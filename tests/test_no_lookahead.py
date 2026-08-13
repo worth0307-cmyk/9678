@@ -9,6 +9,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import shutil
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -182,6 +184,46 @@ def test_vortex_matches_dashboard_implementation(daily):
         if ref is None or np.isnan(ours[i]):
             continue
         assert abs(ours[i] - ref) < 1e-9, f"bar {i}: {ours[i]} vs dashboard {ref}"
+
+
+def test_multi_symbol_loader_roundtrip(tmp_path):
+    """A second symbol dropped into the data dir must load like the first."""
+    from vibt import ingest as ING
+
+    src = tmp_path / "exports"
+    src.mkdir()
+    original = D.DATA_DIR / "BTCUSDT_1d.csv"
+    for tf in ("1h", "4h", "1d"):
+        shutil.copyfile(D.DATA_DIR / f"BTCUSDT_{tf}.csv",
+                        src / f"FAKEUSDT_{tf}_2024-01-01_to_now.csv")
+    assert ING.parse_name(Path("FAKEUSDT_4h_2024-01-01_to_now.csv")) == ("FAKEUSDT", "4h")
+
+    dest = tmp_path / "data"
+    report = ING.ingest(src, dest)
+    assert set(report["symbol"]) == {"FAKEUSDT"}
+    assert set(report["tf"]) == {"1h", "4h", "1d"}
+    assert (report["gaps"] == 0).all()
+    assert (report["bad_ohlc"] == 0).all()
+
+    assert D.available_symbols(dest) == ["FAKEUSDT"]
+    loaded = D.load("1d", dest, "FAKEUSDT")
+    reference = pd.read_csv(original, encoding="utf-8-sig")
+    assert len(loaded) == len(reference)
+    universe = D.load_universe(data_dir=dest)
+    assert set(universe) == {"FAKEUSDT"}
+    assert set(universe["FAKEUSDT"]) == {"1h", "4h", "1d"}
+
+
+def test_band_study_is_symbol_agnostic(tmp_path):
+    """vi_band must run on any symbol's frames, not just the default one."""
+    from vibt import vi_band as VB
+
+    frames = D.load_all()
+    for mode in ("fixed", "quantile", "range"):
+        p = VB.BandParams(band_mode=mode)
+        pos = VB.target_position(VB.build_frame(frames, p), p)
+        assert len(pos) == len(frames["4h"])
+        assert pos.abs().max() <= p.max_size + 1e-9
 
 
 def test_exposure_within_bounds(daily):

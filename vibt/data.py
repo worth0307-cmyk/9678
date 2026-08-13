@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DEFAULT_SYMBOL = "BTCUSDT"
 
 _COLUMN_MAP = {
     "日期时间(北京)": "ts",
@@ -26,10 +27,25 @@ _COLUMN_MAP = {
 TF_MINUTES = {"1h": 60, "4h": 240, "1d": 1440}
 
 
-def load(tf: str, data_dir: Path | None = None) -> pd.DataFrame:
+def available_symbols(data_dir: Path | None = None) -> list[str]:
+    """Symbols that have all three timeframes present in the data directory."""
+    data_dir = data_dir or DATA_DIR
+    by_symbol: dict[str, set[str]] = {}
+    for p in data_dir.glob("*_*.csv"):
+        stem = p.stem
+        if "_" not in stem:
+            continue
+        sym, _, tf = stem.rpartition("_")
+        if tf in TF_MINUTES:
+            by_symbol.setdefault(sym, set()).add(tf)
+    return sorted(s for s, tfs in by_symbol.items() if tfs >= {"1h", "4h", "1d"})
+
+
+def load(tf: str, data_dir: Path | None = None,
+         symbol: str = DEFAULT_SYMBOL) -> pd.DataFrame:
     """Load one timeframe as a UTC-indexed OHLC frame indexed by bar OPEN time."""
     data_dir = data_dir or DATA_DIR
-    path = data_dir / f"BTCUSDT_{tf}.csv"
+    path = data_dir / f"{symbol}_{tf}.csv"
     df = pd.read_csv(path, encoding="utf-8-sig")
     df = df.rename(columns=_COLUMN_MAP)
     missing = {"ts", "open", "high", "low", "close"} - set(df.columns)
@@ -47,8 +63,16 @@ def load(tf: str, data_dir: Path | None = None) -> pd.DataFrame:
     return df
 
 
-def load_all(data_dir: Path | None = None) -> dict[str, pd.DataFrame]:
-    return {tf: load(tf, data_dir) for tf in ("1h", "4h", "1d")}
+def load_all(data_dir: Path | None = None,
+             symbol: str = DEFAULT_SYMBOL) -> dict[str, pd.DataFrame]:
+    return {tf: load(tf, data_dir, symbol) for tf in ("1h", "4h", "1d")}
+
+
+def load_universe(symbols: list[str] | None = None,
+                  data_dir: Path | None = None) -> dict[str, dict[str, pd.DataFrame]]:
+    """{symbol: {tf: frame}} for every symbol that has a complete set of files."""
+    symbols = symbols or available_symbols(data_dir)
+    return {s: load_all(data_dir, s) for s in symbols}
 
 
 def gap_report(df: pd.DataFrame, tf: str) -> pd.DataFrame:

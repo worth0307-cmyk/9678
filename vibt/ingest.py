@@ -55,25 +55,44 @@ def check(df: pd.DataFrame, tf: str) -> dict:
 
 
 def ingest(src: Path, dest: Path | None = None, dry_run: bool = False) -> pd.DataFrame:
+    """Copy the exports into data/, one file per (symbol, timeframe).
+
+    Exporting the same symbol twice with different --start leaves two files for
+    the same (symbol, tf).  Rather than letting glob order decide, load every
+    candidate and keep the one with the longest history; the rest are reported
+    as superseded so nothing disappears silently.
+    """
     dest = dest or D.DATA_DIR
     dest.mkdir(parents=True, exist_ok=True)
-    rows = []
+
+    candidates: dict[tuple[str, str], list[tuple[Path, pd.DataFrame]]] = {}
     for path in sorted(src.glob("*.csv")):
         parsed = parse_name(path)
         if not parsed:
             print(f"  skip {path.name}  (cannot read SYMBOL_tf from the filename)")
             continue
-        symbol, tf = parsed
-        target = dest / f"{symbol}_{tf}.csv"
-        if not dry_run:
-            shutil.copyfile(path, target)
         try:
-            df = D.load(tf, dest if not dry_run else path.parent, symbol) if not dry_run \
-                else _load_direct(path, tf)
+            df = _load_direct(path, parsed[1])
         except Exception as exc:  # noqa: BLE001 - report and continue
             print(f"  FAIL {path.name}: {exc}")
             continue
-        rows.append({"symbol": symbol, "tf": tf, "file": target.name, **check(df, tf)})
+        if df.empty:
+            print(f"  skip {path.name}  (no rows)")
+            continue
+        candidates.setdefault(parsed, []).append((path, df))
+
+    rows = []
+    for (symbol, tf), items in sorted(candidates.items()):
+        items.sort(key=lambda it: (it[1].index[0], -len(it[1])))
+        path, df = items[0]
+        for other_path, other_df in items[1:]:
+            print(f"  superseded: {other_path.name} ({len(other_df)} bars from "
+                  f"{other_df.index[0].date()})  <  keeping {path.name} "
+                  f"({len(df)} bars from {df.index[0].date()})")
+        target = dest / f"{symbol}_{tf}.csv"
+        if not dry_run:
+            shutil.copyfile(path, target)
+        rows.append({"symbol": symbol, "tf": tf, "source": path.name, **check(df, tf)})
     return pd.DataFrame(rows)
 
 

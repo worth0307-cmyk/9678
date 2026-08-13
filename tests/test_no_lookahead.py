@@ -214,6 +214,35 @@ def test_multi_symbol_loader_roundtrip(tmp_path):
     assert set(universe["FAKEUSDT"]) == {"1h", "4h", "1d"}
 
 
+def test_ingest_keeps_the_longest_history(tmp_path):
+    """Two exports of the same symbol/tf: the one starting earlier must win.
+
+    Exporting with two different --start values leaves duplicate keys, and glob
+    order would otherwise decide which one lands in data/.
+    """
+    from vibt import ingest as ING
+
+    src = tmp_path / "exports"
+    src.mkdir()
+    short = pd.read_csv(D.DATA_DIR / "BTCUSDT_1d.csv", encoding="utf-8-sig")
+    ts = pd.to_datetime(short.iloc[:, 0])
+    pre = pd.DataFrame({short.columns[0]: [ts.iloc[0] - pd.Timedelta(days=k)
+                                           for k in range(200, 0, -1)]})
+    for col in short.columns[1:]:
+        pre[col] = float(short[col].iloc[0])
+    long = pd.concat([pre, short])
+
+    short.to_csv(src / "ZZZUSDT_1d_2024-01-01_to_now.csv", index=False, encoding="utf-8-sig")
+    long.to_csv(src / "ZZZUSDT_1d_2023-01-01_to_now.csv", index=False, encoding="utf-8-sig")
+
+    dest = tmp_path / "data"
+    report = ING.ingest(src, dest)
+    assert len(report) == 1, "one row per (symbol, timeframe), not one per file"
+    assert report.iloc[0]["source"] == "ZZZUSDT_1d_2023-01-01_to_now.csv"
+    assert report.iloc[0]["bars"] == len(long)
+    assert len(D.load("1d", dest, "ZZZUSDT")) == len(long)
+
+
 def test_band_study_is_symbol_agnostic(tmp_path):
     """vi_band must run on any symbol's frames, not just the default one."""
     from vibt import vi_band as VB

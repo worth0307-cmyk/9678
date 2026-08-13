@@ -45,24 +45,24 @@
 
 ## 多币种数据
 
-框架已支持多币种（`data/{SYMBOL}_{1h,4h,1d}.csv`）。在**能访问币安的机器**上导出，
-用 VI-Dashboard 自带的导出器（默认就是 U 本位合约，和 Dashboard 口径一致）：
+框架已支持多币种（`data/{SYMBOL}_{1h,4h,1d}.csv`）。完整步骤见 **[RUNBOOK.md](RUNBOOK.md)**，摘要：
 
 ```bash
-VI_DASHBOARD=~/VI-Dashboard ./scripts/fetch_universe.sh   # 6 个币 × 3 周期
-# 或手动：
-python3 backend/tools/export_klines.py --symbol ETHUSDT --market futures \
-    --intervals 1h,4h,1d --start 2024-01-01 --out ./exports
+# VPS 上（Claude Code 会话的出口策略封了币安，必须在能访问币安的机器上跑）
+ssh vpn-sg && cd ~/VI-Dashboard
+for S in BTCUSDT BNBUSDT ETHUSDT HYPEUSDT SOLUSDT TAOUSDT; do
+  python3 backend/tools/export_klines.py --symbol "$S" \
+    --market futures --intervals 1h,4h,1d --start 2024-01-01 --out ./exports
+done
+
+# 本地
+scp -r vpn-sg:~/VI-Dashboard/exports "$env:USERPROFILE\Desktop\VI数据"
+python -m vibt.ingest "$env:USERPROFILE\Desktop\VI数据"
+python scripts/12_multi_symbol.py
 ```
 
-把 `exports/` 拷回本仓库后：
-
-```bash
-python -m vibt.ingest ./exports        # 归一化命名 + 完整性检查 + 1h 重采样交叉校验
-python scripts/12_multi_symbol.py      # 六币种池化的 VI+ 双突破事件研究
-```
-
-`ingest` 会报告每个币的实际覆盖区间——HYPE/TAO 上市晚于 2024-01-01，历史会短一些，这是正常的。
+`ingest` 会逐币报告真实覆盖区间、缺口、异常 OHLC，并用 1h 重采样交叉校验 4h/1d。
+HYPE/TAO 上市晚于 2024-01-01，历史会短一些，这是正常的——但要注意 HYPE 基本只覆盖了下跌段。
 
 ## 快速开始
 

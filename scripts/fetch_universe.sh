@@ -1,41 +1,54 @@
 #!/usr/bin/env bash
-# Export the 6-symbol universe from Binance and load it into this repo.
+# Export the 6-symbol universe from Binance.
 #
-# Run this on a machine that can reach Binance (your VPS / the box running
-# VI-Dashboard).  This session's egress policy blocks api.binance.com and
-# fapi.binance.com, so the fetch cannot happen inside Claude Code.
+# Run this ON THE VPS, inside your VI-Dashboard checkout:
 #
-#   VI_DASHBOARD=~/VI-Dashboard ./scripts/fetch_universe.sh
+#   ssh vpn-sg
+#   cd ~/VI-Dashboard && git fetch origin main && git checkout main && git reset --hard origin/main
+#   bash /path/to/fetch_universe.sh          # or paste the loop below
 #
-# Then copy ./exports here and run:  python -m vibt.ingest ./exports
+# It is a thin loop over backend/tools/export_klines.py, whose defaults
+# (--market futures, --intervals 1h,4h,1d, --start 2024-01-01) already match
+# the BTCUSDT files in data/.  Nothing here needs to be installed.
+#
+# This session's egress policy blocks api.binance.com and fapi.binance.com, so
+# the fetch cannot run inside Claude Code -- it has to happen on the VPS.
 
-set -euo pipefail
+set -uo pipefail
 
-VI_DASHBOARD="${VI_DASHBOARD:-../VI-Dashboard}"
-EXPORTER="$VI_DASHBOARD/backend/tools/export_klines.py"
+EXPORTER="${EXPORTER:-backend/tools/export_klines.py}"
 OUT="${OUT:-./exports}"
 START="${START:-2024-01-01}"
-MARKET="${MARKET:-futures}"        # matches the dashboard: USDT-M perpetuals
+MARKET="${MARKET:-futures}"        # USDT-M perpetuals, same as the dashboard
 SYMBOLS="${SYMBOLS:-BTCUSDT BNBUSDT ETHUSDT HYPEUSDT SOLUSDT TAOUSDT}"
 
 if [[ ! -f "$EXPORTER" ]]; then
   echo "exporter not found at $EXPORTER" >&2
-  echo "set VI_DASHBOARD to your VI-Dashboard checkout, e.g." >&2
-  echo "  VI_DASHBOARD=~/VI-Dashboard $0" >&2
+  echo "cd into your VI-Dashboard checkout first, or set EXPORTER=/path/to/export_klines.py" >&2
   exit 1
 fi
 
 mkdir -p "$OUT"
+ok=(); failed=()
 for S in $SYMBOLS; do
   echo "=== $S"
-  # Symbols listed after $START simply return less history; that is fine and the
-  # ingest step reports the real coverage per symbol.
-  python3 "$EXPORTER" --symbol "$S" --market "$MARKET" \
-      --intervals 1h,4h,1d --start "$START" --out "$OUT" || {
-        echo "  !! $S failed (not listed on $MARKET? wrong ticker?) — continuing" >&2
-      }
+  # A symbol listed after $START just returns less history; ingest reports the
+  # real coverage per symbol, so short histories are fine, not errors.
+  if python3 "$EXPORTER" --symbol "$S" --market "$MARKET" \
+       --intervals 1h,4h,1d --start "$START" --out "$OUT"; then
+    ok+=("$S")
+  else
+    failed+=("$S")
+    echo "  !! $S failed — wrong ticker, or not listed on $MARKET. Continuing." >&2
+  fi
 done
 
 echo
-echo "exported to $OUT"
-echo "next:  python -m vibt.ingest $OUT"
+echo "exported OK : ${ok[*]:-none}"
+[[ ${#failed[@]} -gt 0 ]] && echo "FAILED      : ${failed[*]}"
+echo "files in $OUT:"
+ls -1 "$OUT" | sed 's/^/  /'
+echo
+echo "next, from your local machine:"
+echo "  scp -r vpn-sg:~/VI-Dashboard/exports \"\$env:USERPROFILE\\Desktop\\VI数据\""
+echo "  python -m vibt.ingest \"\$env:USERPROFILE\\Desktop\\VI数据\""

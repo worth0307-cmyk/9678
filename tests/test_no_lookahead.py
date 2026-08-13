@@ -255,6 +255,48 @@ def test_band_study_is_symbol_agnostic(tmp_path):
         assert pos.abs().max() <= p.max_size + 1e-9
 
 
+def test_xsec_weights_are_dollar_neutral_and_causal():
+    """Long/short weights must net to zero, and risk parity must not flip a leg."""
+    from vibt import indicators as I2, xsec as X
+
+    universe = D.load_universe()
+    if len(universe) < 3:
+        pytest.skip("needs a multi-symbol panel")
+    feat = X.feature_panel(universe, lambda d: I2.vortex(d, 14)["vi_spread"])
+    w = X.cross_sectional_weights(feat, n_side=2, mode="long_short")
+    active = w[w.abs().sum(axis=1) > 0]
+    assert np.allclose(active.sum(axis=1), 0.0, atol=1e-9), "book is not dollar-neutral"
+    assert np.allclose(active.abs().sum(axis=1), 1.0, atol=1e-9), "gross exposure drifted"
+
+    vol = X.feature_panel(universe, lambda d: I2.parkinson_vol(d, 30, 365.0))
+    rp = X.risk_parity(w, vol)
+    act = rp[rp.abs().sum(axis=1) > 0]
+    assert np.allclose(act.sum(axis=1), 0.0, atol=1e-9), "risk parity broke neutrality"
+    # every name long before must still be long after, and vice versa
+    both = (w != 0) & (rp != 0)
+    assert (np.sign(w[both].fillna(0)) == np.sign(rp[both].fillna(0))).all().all(), \
+        "risk parity flipped the sign of a leg"
+
+    # causality: truncating the panel must not change earlier weights
+    cut = len(feat) - 120
+    w_short = X.cross_sectional_weights(feat.iloc[:cut], n_side=2, mode="long_short")
+    pd.testing.assert_frame_equal(w.iloc[:cut], w_short)
+
+
+def test_xsec_run_applies_execution_lag():
+    """Weights set on the last row must earn nothing."""
+    from vibt import xsec as X
+
+    universe = D.load_universe()
+    if len(universe) < 3:
+        pytest.skip("needs a multi-symbol panel")
+    px = X.price_panel(universe, "1d", "open")
+    w = pd.DataFrame(0.0, index=px.index, columns=px.columns)
+    w.iloc[-1] = [1.0 / len(px.columns)] * len(px.columns)
+    res = X.run(px, w, B.Costs(0, 0), 365.0)
+    assert res.rets.abs().sum() == pytest.approx(0.0, abs=1e-12)
+
+
 def test_exposure_within_bounds(daily):
     p = SYS.Params()
     s = SYS.target_exposure(daily, p)

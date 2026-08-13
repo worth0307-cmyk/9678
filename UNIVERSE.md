@@ -29,7 +29,68 @@
 
 ---
 
-## 候选名单（约 34 个，按预期与 BTC 的相关性从低到高）
+## 推荐执行名单（从 34 个候选里挑）
+
+> **重要限制**：我无法在这个会话里验证币安的实际上市状态（连不上币安，知识截止 2026-05）。
+> 下面是先验判断，**导出本身就是验证**——代码错了或未上市的会失败跳过，不影响其他币。
+
+### 结构性矛盾：历史长度 vs 低相关性
+
+**历史最长的币恰恰和 BTC 相关性最高，相关性最低的恰恰是新上市的。**
+这不是巧合——新币的独立走势正来自它的上市动态。所以"2023-01-01 起 + 低相关"有内在冲突。
+
+框架对参差不齐的历史是**原生支持**的（`xsec.cross_sectional_weights` 只对当天有有效数据的币排序，
+HYPE/TAO 在上市前根本不进排序），所以**短历史不是排除理由**，只是权重上要心里有数。
+
+### 第一优先（12 个）——建议一定要跑
+
+| 币种 | 组 | 预期上市 | 选它的理由 |
+|---|---|---|---|
+| `DOGEUSDT` | A | 2020 | 全历史 meme，流动性最好的 meme，独立资金流 |
+| `1000PEPEUSDT` | A | 2023-05 | 特质波动极高，2023 起就有 |
+| `1000SHIBUSDT` | A | 2021 | 全历史 meme，流动性好 |
+| `XRPUSDT` | E | 2020 | **E 组里唯一我看好的**：监管事件驱动，和 BTC 脱钩明显 |
+| `FETUSDT` | B | 2021 | AI 赛道，全历史，TAO 的同类但历史长得多 |
+| `RENDERUSDT` | B | 2022 | AI/DePIN，注意是 RENDER 不是 RNDR |
+| `WLDUSDT` | B | 2023-07 | 特质性极强（自己的解锁/叙事周期） |
+| `SUIUSDT` | C | 2023-05 | 新公链里流动性最好的之一 |
+| `SEIUSDT` | C | 2023-08 | 独立叙事 |
+| `TIAUSDT` | C | 2023-10 | 独立叙事，波动大 |
+| `DYDXUSDT` | D | 2021 | 全历史，衍生品赛道 |
+| `PENDLEUSDT` | D | 2023 | 收益率赛道，和大盘关联弱 |
+
+这 12 个的组合逻辑：**4 个全历史低相关（DOGE/SHIB/XRP/FET/DYDX）打底，
+8 个 2023 年内上市的高特质波动提供离散度**。
+
+### 第二优先（8 个）——一起跑，边际成本很低
+
+```
+WIFUSDT  1000BONKUSDT  1000FLOKIUSDT     # meme，2023-2024 上市，波动最大
+ARBUSDT  OPUSDT  APTUSDT                  # L2/L1，历史较长
+ENAUSDT  LDOUSDT                          # DeFi
+```
+
+### 建议跳过（14 个）——理由是"我预期它们会被相关性筛掉"
+
+```
+ADAUSDT  LTCUSDT  DOTUSDT  ATOMUSDT  LINKUSDT  AVAXUSDT  AAVEUSDT  NEARUSDT
+```
+这 8 个是典型的"高相关大市值"，和 BTC 大概 0.75~0.85。
+**它们进来只会把有效独立标的数往下拉**——正是 REPORT_XSEC 第 3 节证明没用的那一类。
+
+```
+GRTUSDT  GMXUSDT  ARKMUSDT  AKTUSDT  JUPUSDT  STRKUSDT
+```
+这 6 个不是不好，是**流动性存疑**。横截面策略在 30bp 成本下就转负，
+点差大的小币会直接吃掉 alpha。**宁可要 20 个流动性好的，不要 34 个含一半垃圾的。**
+
+> 如果你想要更彻底：把跳过的这 14 个也导出来（只导 1d，很快），
+> 让 `scripts/16_screen_universe.py` 用数据否掉它们，比信我的先验更可靠。
+> 我上面的分组只是省你时间，不是定论。
+
+---
+
+## 原始候选名单（约 34 个，按预期与 BTC 的相关性从低到高）
 
 ### A 组 · Meme（特质波动最高，和 BTC 相关性通常最低）
 
@@ -72,34 +133,52 @@ XRPUSDT  ADAUSDT  LTCUSDT  LINKUSDT  AVAXUSDT  DOTUSDT  ATOMUSDT  NEARUSDT
 
 ---
 
-## 导出命令
+## 导出命令（20 个币 × 1h/4h/1d，2023-01-01 起）
 
 在 VPS 上（`~/VI-Dashboard` 目录里）：
 
 ```bash
-SYMS="DOGEUSDT 1000PEPEUSDT WIFUSDT 1000BONKUSDT 1000SHIBUSDT 1000FLOKIUSDT \
-RENDERUSDT FETUSDT ARKMUSDT WLDUSDT AKTUSDT GRTUSDT \
-SUIUSDT SEIUSDT TIAUSDT APTUSDT ARBUSDT OPUSDT STRKUSDT JUPUSDT \
-DYDXUSDT GMXUSDT LDOUSDT ENAUSDT PENDLEUSDT AAVEUSDT \
-XRPUSDT ADAUSDT LTCUSDT LINKUSDT AVAXUSDT DOTUSDT ATOMUSDT NEARUSDT"
+SYMS="DOGEUSDT 1000PEPEUSDT 1000SHIBUSDT XRPUSDT FETUSDT RENDERUSDT WLDUSDT \
+SUIUSDT SEIUSDT TIAUSDT DYDXUSDT PENDLEUSDT \
+WIFUSDT 1000BONKUSDT 1000FLOKIUSDT ARBUSDT OPUSDT APTUSDT ENAUSDT LDOUSDT"
 
+ok=(); fail=()
 for S in $SYMS; do
   echo "=== $S"
-  python3 backend/tools/export_klines.py --symbol "$S" \
-    --market futures --intervals 1d --start 2023-01-01 --out ./exports \
-    || echo "  !! $S 失败（代码不对？未上合约？），继续"
+  if python3 backend/tools/export_klines.py --symbol "$S" \
+       --market futures --intervals 1h,4h,1d --start 2023-01-01 --out ./exports; then
+    ok+=("$S")
+  else
+    fail+=("$S"); echo "  !! $S 失败（代码不对？未上合约？），继续"
+  fi
 done
-ls -1 ./exports | wc -l
+echo; echo "成功: ${ok[*]}"; echo "失败: ${fail[*]}"
+ls -1 ./exports | wc -l    # 期望 60 个文件（20 币 × 3 周期）
 ```
 
-**注意这里只导 `--intervals 1d`。** 筛选阶段只需要日线算相关性，34 个币 × 3 周期
-会是几百 MB，没必要。**等筛完选出 15~20 个之后，再单独把它们的 1h/4h 补齐。**
+或直接用仓库里的脚本（等价，多了汇总输出）：
+
+```bash
+SYMBOLS="DOGEUSDT 1000PEPEUSDT 1000SHIBUSDT XRPUSDT FETUSDT RENDERUSDT WLDUSDT \
+SUIUSDT SEIUSDT TIAUSDT DYDXUSDT PENDLEUSDT WIFUSDT 1000BONKUSDT 1000FLOKIUSDT \
+ARBUSDT OPUSDT APTUSDT ENAUSDT LDOUSDT" bash scripts/fetch_universe.sh
+```
+
+**数据量预估**：3.6 年的 1h 数据每个币约 1.8MB，20 个币三周期合计约 **45MB**
+（现有 6 币是 11MB）。git 扛得住，但会明显变大。
+
+> **一个诚实的提醒**：横截面分析实际只用 **1d**。1h 占了 80% 的体积，
+> 而且日线换手在 6.5bp 下就已经吃掉三分之一的 Sharpe（REPORT_XSEC 第 4 节），
+> 更高频的横截面大概率是负期望。你要求三个周期我照做了，
+> 但如果想省事，**先只导 1d 跑筛选**，等确认哪些币留下来再补 1h/4h 也完全可以。
 
 拉回本地后：
 
 ```bash
 python -m vibt.ingest "<你的导出目录>"
-python scripts/16_screen_universe.py
+python scripts/16_screen_universe.py       # 相关性筛选 + 有效独立标的数
+python scripts/14_cross_section.py         # 横截面重测
+python scripts/15_xsec_robustness.py       # 稳健性
 ```
 
 ---

@@ -46,6 +46,34 @@ def events(frames: dict, p: VB.BandParams) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def null_distribution(frames_by_symbol: dict, counts: dict[str, int], h: int,
+                      n_draws: int = 5000, seed: int = 11) -> np.ndarray:
+    """Pooled mean forward return if the SAME number of events per symbol fired
+    on random dates instead.
+
+    Without this, an event study on six crypto assets over a period when most of
+    them rose just measures the drift.  Drawing the same per-symbol event counts
+    from the same bars keeps drift, volatility and cross-symbol weighting intact,
+    so anything left over is the signal.
+    """
+    rng = np.random.default_rng(seed)
+    pools = {}
+    for sym, frames in frames_by_symbol.items():
+        o = frames["4h"]["open"].to_numpy()
+        fwd = o[1 + h:] / o[1:-h] - 1 if h < len(o) - 1 else np.array([])
+        pools[sym] = fwd[np.isfinite(fwd)]
+    out = np.empty(n_draws)
+    for i in range(n_draws):
+        vals = []
+        for sym, k in counts.items():
+            p = pools.get(sym)
+            if p is None or len(p) == 0 or k == 0:
+                continue
+            vals.append(rng.choice(p, size=k, replace=True))
+        out[i] = np.concatenate(vals).mean() if vals else np.nan
+    return out
+
+
 def summarise(pool: pd.DataFrame, label: str) -> None:
     print(f"\n  {label}")
     print(f"    {'event':<24}{'n':>5}   " + "  ".join(f"{f'+{h*4}h':>17}" for h in HORIZONS))
@@ -68,9 +96,33 @@ def summarise(pool: pd.DataFrame, label: str) -> None:
             continue
         rng = np.random.default_rng(0)
         boot = np.array([rng.choice(v, len(v), replace=True).mean() for _ in range(10_000)])
-        名 = "SHORT the up-break" if side == 1 else "LONG the down-break"
-        print(f"      your trade '{名}' over 48h: mean {v.mean():+.2%}  "
-              f"win {np.mean(v>0):.0%}  P(edge>0) = {np.mean(boot>0):.1%}")
+        name = "SHORT the up-break" if side == 1 else "LONG the down-break"
+        print(f"      your trade '{name}' over 48h: mean {v.mean():+.2%}  "
+              f"win {np.mean(v>0):.0%}  P(mean>0) = {np.mean(boot>0):.1%}")
+
+
+def vs_null(pool: pd.DataFrame, frames_by_symbol: dict, label: str) -> None:
+    """Event mean against random-date draws with identical per-symbol counts."""
+    print(f"\n  {label}: EXCESS over random dates (drift removed)")
+    for side, sname in ((1, "up-break"), (-1, "down-break")):
+        sub = pool[pool["side"] == side]
+        if len(sub) < 20:
+            print(f"    {sname:<12} n={len(sub):3d}  too few events")
+            continue
+        counts = sub.groupby("symbol").size().to_dict()
+        for h in (6, 12, 30):
+            v = sub[f"h{h}"].dropna().to_numpy()
+            if len(v) < 20:
+                continue
+            null = null_distribution(frames_by_symbol, counts, h)
+            null = null[np.isfinite(null)]
+            excess = v.mean() - null.mean()
+            pct = float((null < v.mean()).mean())
+            two_sided = 2 * min(pct, 1 - pct)
+            print(f"    {sname:<12} +{h*4:>3}h  n={len(v):3d}  "
+                  f"raw {v.mean():+7.2%}  random-date baseline {null.mean():+7.2%}  "
+                  f"EXCESS {excess:+7.2%}  p={two_sided:.3f}"
+                  f"{'  *' if two_sided < 0.05 else ''}")
 
 
 def main() -> None:
@@ -112,6 +164,8 @@ def main() -> None:
         pool["mode"] = mode_name
         all_rows.append(pool)
         summarise(pool, f"POOLED across {len(symbols)} symbol(s)")
+        vs_null(pool, {s: D.load_all(symbol=s) for s in symbols},
+                f"POOLED across {len(symbols)} symbol(s)")
 
         if len(symbols) > 1:
             print("\n    per-symbol +48h mean, up-breaks (consistency check):")

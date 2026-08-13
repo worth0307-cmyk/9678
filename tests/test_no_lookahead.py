@@ -122,6 +122,68 @@ def test_vortex_matches_definition(daily):
     assert (v[["vi_plus", "vi_minus"]].dropna() > 0).all().all()
 
 
+def test_rolling_bands_are_causal():
+    """Adaptive rails must be built from prior bars only.
+
+    This is the bug the fixed-band version cannot have and the adaptive one can:
+    a rail computed from the whole sample would quietly leak the future into
+    every historical signal.
+    """
+    from vibt import vi_band as VB
+
+    frames = D.load_all()
+    cut = len(frames["4h"]) - 200
+    for mode in ("quantile", "range"):
+        p = VB.BandParams(band_mode=mode)
+        full = VB.build_frame(frames, p).iloc[:cut]
+        truncated = {"4h": frames["4h"].iloc[:cut], "1d": frames["1d"], "1h": frames["1h"]}
+        part = VB.build_frame(truncated, p)
+        for col in ("up4", "dn4", "s4"):
+            pd.testing.assert_series_equal(full[col], part[col], check_names=False,
+                                           obj=f"{mode}/{col} leaks future data")
+
+
+def test_band_states_match_dashboard_rule():
+    """vip > upper -> 1, vip < lower -> -1, double = both timeframes agree."""
+    from vibt import vi_band as VB
+
+    frames = D.load_all()
+    p = VB.BandParams()
+    df = VB.build_frame(frames, p)
+    live = df.dropna(subset=["vi4", "s1d"])
+    assert (live.loc[live["vi4"] > p.up_4h, "s4"] == 1).all()
+    assert (live.loc[live["vi4"] < p.dn_4h, "s4"] == -1).all()
+    inside = live[(live["vi4"] <= p.up_4h) & (live["vi4"] >= p.dn_4h)]
+    assert (inside["s4"] == 0).all()
+    dbl = live[live["double"] != 0]
+    assert (dbl["s4"] == dbl["s1d"]).all()
+    assert (live.loc[live["s4"] != live["s1d"], "double"] == 0).all()
+
+
+def test_vortex_matches_dashboard_implementation(daily):
+    """Our Vortex must equal the dashboard's backend/vortex.py, bar for bar."""
+    n = 14
+    rows = list(zip(daily["open"], daily["high"], daily["low"], daily["close"]))
+    vm_p, vm_m, trs, vip = [], [], [], []
+    for i, (_, h, lo, c) in enumerate(rows):
+        prev = rows[i - 1] if i > 0 else None
+        pc = prev[3] if prev else None
+        tr = (h - lo) if pc is None else max(h - lo, abs(h - pc), abs(lo - pc))
+        trs.append(tr)
+        vm_p.append(abs(h - prev[2]) if prev else None)
+        vm_m.append(abs(lo - prev[1]) if prev else None)
+        if i >= n and all(v is not None for v in vm_p[i - n + 1: i + 1]):
+            s = sum(trs[i - n + 1: i + 1])
+            vip.append(sum(vm_p[i - n + 1: i + 1]) / s if s else None)
+        else:
+            vip.append(None)
+    ours = I.vortex(daily, n)["vi_plus"].to_numpy()
+    for i, ref in enumerate(vip):
+        if ref is None or np.isnan(ours[i]):
+            continue
+        assert abs(ours[i] - ref) < 1e-9, f"bar {i}: {ours[i]} vs dashboard {ref}"
+
+
 def test_exposure_within_bounds(daily):
     p = SYS.Params()
     s = SYS.target_exposure(daily, p)

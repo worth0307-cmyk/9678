@@ -124,6 +124,39 @@ def main() -> None:
         tl.to_csv(REPORTS / "band_trades_asspecified.csv", index=False)
 
     print("\n" + "=" * 210)
+    print("D2. ROLLING ADAPTIVE BANDS -- what you actually do: re-read the VI+ high/low over")
+    print("    the last ~6 months and put the rails at a relatively high / low value.")
+    print("    Recomputed every bar from PRIOR bars only, so unlike section D there is no lookahead.")
+    print("=" * 210)
+    for mode, tag in (("quantile", "q86/q14"), ("range", "range 80/20")):
+        for direction in ("fade", "follow"):
+            run(frames, VB.BandParams(band_mode=mode, direction=direction),
+                f"rolling {tag}, {direction}", rows)
+        run(frames, VB.BandParams(band_mode=mode, pyramid_steps=0),
+            f"rolling {tag}, fade, no pyramid", rows)
+        run(frames, VB.BandParams(band_mode=mode, stop_atr=2.0),
+            f"rolling {tag}, fade, 2xATR stop", rows)
+
+    print("\n  event counts and forward returns by band definition:")
+    for mode, tag in (("fixed", "fixed (your screenshot)"), ("quantile", "rolling q86/q14"),
+                      ("range", "rolling range 80/20")):
+        d = VB.build_frame(frames, VB.BandParams(band_mode=mode))
+        o = d["open"].to_numpy()
+        dd = d["double"]
+        print(f"\n    {tag}")
+        for kind, val in (("up-break (you SHORT)", 1), ("down-break (you LONG)", -1)):
+            idx = [d.index.get_loc(t) for t in d.index[(dd != dd.shift(1)) & (dd == val)]]
+            cells = []
+            for h in (3, 6, 12, 30):
+                rs = np.array([o[i + 1 + h] / o[i + 1] - 1 for i in idx if i + 1 + h < len(d)])
+                if len(rs) < 5:
+                    cells.append(f"{'--':>16}")
+                    continue
+                t = rs.mean() / (rs.std(ddof=1) / np.sqrt(len(rs)))
+                cells.append(f"{rs.mean():+7.2%} (t{t:+4.1f})")
+            print(f"      {kind:<24}n={len(idx):3d}   " + "  ".join(cells))
+
+    print("\n" + "=" * 210)
     print("F. REGIME-DIRECTED: the band event is only a TRIGGER, the daily trend picks the side")
     print("=" * 210)
     run(frames, VB.BandParams(direction="regime"), "regime-directed", rows)

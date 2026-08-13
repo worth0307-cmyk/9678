@@ -33,6 +33,19 @@ class BandParams:
     up_1d: float = 1.155
     dn_1d: float = 0.60
 
+    # How the channel is set.  "fixed" uses the four levels above.  The other two
+    # reproduce what the trader actually does -- eyeball the VI+ high/low over the
+    # last `band_months` and put the rails at a relatively high / low value -- and
+    # they are recomputed every bar from PRIOR bars only, so there is no lookahead.
+    #   "quantile" : rails at the q_up / q_dn quantile of the trailing window
+    #   "range"    : rails at range_up / range_dn of the way from window min to max
+    band_mode: str = "fixed"
+    band_months: float = 6.0
+    q_up: float = 0.86              # matches the screenshot: 88% on 4H, 86% on 1D
+    q_dn: float = 0.14
+    range_up: float = 0.80          # screenshot sits at 79.6% (4H) / 85.7% (1D)
+    range_dn: float = 0.20
+
     # "fade"   = short the up-breakout, long the down-breakout (the dashboard rule)
     # "follow" = the opposite sign
     # "regime" = the breakout is only a TRIGGER; the daily trend picks the side
@@ -56,7 +69,11 @@ class BandParams:
 
 
 def percentile_bands(frames: dict, vi_len: int, up_q: float, dn_q: float) -> dict:
-    """Bands set by rolling-free sample quantiles of VI+ instead of fixed levels."""
+    """Fixed rails from FULL-SAMPLE quantiles.
+
+    Diagnostic only -- it peeks at the whole history, so it must never be used to
+    justify a live rule.  Use band_mode="quantile" for the honest rolling version.
+    """
     out = {}
     for tf, key in (("4h", "4h"), ("1d", "1d")):
         v = I.vortex(frames[tf], vi_len)["vi_plus"].dropna()
@@ -65,23 +82,59 @@ def percentile_bands(frames: dict, vi_len: int, up_q: float, dn_q: float) -> dic
     return out
 
 
+def _rails(vip: pd.Series, tf: str, p: BandParams) -> tuple[pd.Series, pd.Series]:
+    """Upper/lower rails for one timeframe, using only bars strictly before t."""
+    if p.band_mode == "fixed":
+        up = p.up_4h if tf == "4h" else p.up_1d
+        dn = p.dn_4h if tf == "4h" else p.dn_1d
+        return (pd.Series(up, index=vip.index), pd.Series(dn, index=vip.index))
+
+    bars = int(p.band_months * 30 * (6 if tf == "4h" else 1))
+    prior = vip.shift(1)                       # the rail cannot see its own bar
+    if p.band_mode == "quantile":
+        up = prior.rolling(bars, min_periods=bars // 3).quantile(p.q_up)
+        dn = prior.rolling(bars, min_periods=bars // 3).quantile(p.q_dn)
+    elif p.band_mode == "range":
+        hi = prior.rolling(bars, min_periods=bars // 3).max()
+        lo = prior.rolling(bars, min_periods=bars // 3).min()
+        up = lo + p.range_up * (hi - lo)
+        dn = lo + p.range_dn * (hi - lo)
+    else:
+        raise ValueError(f"unknown band_mode {p.band_mode!r}")
+    return up, dn
+
+
 def build_frame(frames: dict, p: BandParams) -> pd.DataFrame:
-    """4H grid carrying both VI+ series, their states, and the double-breakout flag."""
+    """4H grid carrying both VI+ states and the double-breakout flag.
+
+    Each timeframe's state is computed on its OWN grid against its own rails, then
+    the daily state is carried onto the 4H grid by close time.
+    """
     f4, f1 = frames["4h"], frames["1d"]
     vi4 = I.vortex(f4, p.vi_len)["vi_plus"]
     vi1 = I.vortex(f1, p.vi_len)["vi_plus"]
 
+    up4, dn4 = _rails(vi4, "4h", p)
+    up1, dn1 = _rails(vi1, "1d", p)
+
+    s4 = pd.Series(np.where(vi4 > up4, 1, np.where(vi4 < dn4, -1, 0)), index=f4.index)
+    s1 = pd.Series(np.where(vi1 > up1, 1, np.where(vi1 < dn1, -1, 0)), index=f1.index)
+    s1 = s1.where(vi1.notna())
+
     d = f1.copy()
     d["vip"] = vi1
-    vi1_on_4h = D.align_higher_tf(f4.index, d, "1d", ["vip"])["vip_1d"]
+    d["state"] = s1
+    carried = D.align_higher_tf(f4.index, d, "1d", ["vip", "state"])
 
     df = pd.DataFrame({
         "open": f4["open"], "high": f4["high"], "low": f4["low"], "close": f4["close"],
-        "vi4": vi4, "vi1d": vi1_on_4h,
+        "vi4": vi4, "vi1d": carried["vip_1d"],
+        "up4": up4, "dn4": dn4,
     })
-    df["s4"] = np.where(df["vi4"] > p.up_4h, 1, np.where(df["vi4"] < p.dn_4h, -1, 0))
-    df["s1d"] = np.where(df["vi1d"] > p.up_1d, 1, np.where(df["vi1d"] < p.dn_1d, -1, 0))
-    df["double"] = np.where((df["s4"] == df["s1d"]) & (df["s4"] != 0), df["s4"], 0)
+    df["s4"] = s4
+    df["s1d"] = carried["state_1d"]
+    df["double"] = np.where((df["s4"] == df["s1d"]) & (df["s4"] != 0) & df["s1d"].notna(),
+                            df["s4"], 0)
     df["atr"] = I.atr(f4, 14)
 
     if p.trend_filter or p.direction == "regime":
@@ -111,6 +164,8 @@ def target_position(df: pd.DataFrame, p: BandParams) -> pd.Series:
     high, low = df["high"].to_numpy(), df["low"].to_numpy()
     atr = df["atr"].to_numpy()
     bull = df["bull_1d"].to_numpy()
+    up4 = df["up4"].to_numpy()
+    dn4 = df["dn4"].to_numpy()
 
     pos = np.zeros(n)
     cur = 0.0
@@ -141,7 +196,7 @@ def target_position(df: pd.DataFrame, p: BandParams) -> pd.Series:
                 cur = side * p.base_size
                 units = 1
                 entry_px = close[t]
-                band_ref = p.up_4h if d > 0 else p.dn_4h
+                band_ref = up4[t] if d > 0 else dn4[t]   # the rail it broke, live value
                 peak_excursion = abs(vi4[t] - band_ref)
                 held = 0
             pos[t] = cur

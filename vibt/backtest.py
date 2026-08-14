@@ -48,6 +48,10 @@ class Result:
     trades: pd.DataFrame
     stats: metrics.Stats
     name: str = ""
+    # Panel engines fill this with the weights ACTUALLY held per bar, after any
+    # rebalance-frequency resampling.  Recomputing it by hand outside the engine
+    # is how an audit ends up disagreeing with the equity curve.
+    weights: pd.DataFrame | None = None
 
     def __str__(self) -> str:
         return f"{self.name:<34} {self.stats}"

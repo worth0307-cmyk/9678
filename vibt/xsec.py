@@ -137,7 +137,7 @@ def run(
     st.extra["gross_exposure"] = float(exposure.mean())
     st.extra["net_exposure"] = float(held.sum(axis=1).iloc[:-1].mean())
     return B.Result(net, gross_ret.iloc[:-1], exposure, equity, cost.iloc[:-1],
-                    pd.DataFrame(), st, name)
+                    pd.DataFrame(), st, name, weights=held.iloc[:-1])
 
 
 def beta_to(rets: pd.Series, bench: pd.Series) -> tuple[float, float]:

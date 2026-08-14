@@ -15,6 +15,9 @@
 # the fetch cannot run inside Claude Code -- it has to happen on the VPS.
 
 set -uo pipefail
+set +H          # history expansion turns "!!" into the previous command when a
+                # human pastes this into an interactive shell, which breaks the
+                # quoting and strands the terminal at a ">" prompt
 
 EXPORTER="${EXPORTER:-backend/tools/export_klines.py}"
 OUT="${OUT:-./exports}"
@@ -39,13 +42,14 @@ for S in $SYMBOLS; do
     ok+=("$S")
   else
     failed+=("$S")
-    echo "  !! $S failed — wrong ticker, or not listed on $MARKET. Continuing." >&2
+    echo "  FAILED $S — wrong ticker, or not listed on $MARKET. Continuing." >&2
   fi
 done
 
 echo
 echo "exported OK : ${ok[*]:-none}"
 [[ ${#failed[@]} -gt 0 ]] && echo "FAILED      : ${failed[*]}"
+[[ ${#ok[@]} -eq 0 ]] && echo "nothing exported — check the exporter path and tickers" >&2
 echo "files in $OUT:"
 ls -1 "$OUT" | sed 's/^/  /'
 echo

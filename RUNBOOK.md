@@ -17,14 +17,19 @@ cd ~/VI-Dashboard && git fetch origin main && git checkout main && git reset --h
 然后直接贴这一段（不依赖本仓库的任何文件）：
 
 ```bash
+set +H
 for S in BTCUSDT BNBUSDT ETHUSDT HYPEUSDT SOLUSDT TAOUSDT; do
   echo "=== $S"
   python3 backend/tools/export_klines.py --symbol "$S" \
     --market futures --intervals 1h,4h,1d --start 2024-01-01 --out ./exports \
-    || echo "  !! $S 失败，继续下一个"
+    || echo "  FAILED $S，继续下一个"
 done
 ls -1 ./exports
 ```
+
+> 开头那句 `set +H` 是必需的：交互式 bash 默认开启历史展开，
+> **双引号里出现 `!!` 会被替换成上一条命令**，引号随即不配对，终端就卡在 `>` 提示符上。
+> 真卡住了按 `Ctrl+C` 退出，没有副作用。
 
 跑完应该是 **18 个文件**（6 币 × 3 周期），命名形如 `ETHUSDT_4h_2024-01-01_to_now.csv`。
 

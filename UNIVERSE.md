@@ -135,33 +135,39 @@ XRPUSDT  ADAUSDT  LTCUSDT  LINKUSDT  AVAXUSDT  DOTUSDT  ATOMUSDT  NEARUSDT
 
 ## 导出命令（20 个币 × 1h/4h/1d，2023-01-01 起）
 
+> **粘贴进终端前先看这条**：交互式 bash 默认开启历史展开，
+> **双引号里的 `!!` 会被替换成上一条命令**，导致引号不配对、终端卡在 `>` 提示符。
+> 所以下面的版本 (a) 开头 `set +H` 关掉历史展开，(b) 符号表写成一行避免
+> 反斜杠续行后面跟空格的问题，(c) 提示语里不含 `!!`。
+> 卡住了按 `Ctrl+C` 退出即可，不会有副作用。
+
 在 VPS 上（`~/VI-Dashboard` 目录里）：
 
 ```bash
-SYMS="DOGEUSDT 1000PEPEUSDT 1000SHIBUSDT XRPUSDT FETUSDT RENDERUSDT WLDUSDT \
-SUIUSDT SEIUSDT TIAUSDT DYDXUSDT PENDLEUSDT \
-WIFUSDT 1000BONKUSDT 1000FLOKIUSDT ARBUSDT OPUSDT APTUSDT ENAUSDT LDOUSDT"
+set +H
+SYMS="DOGEUSDT 1000PEPEUSDT 1000SHIBUSDT XRPUSDT FETUSDT RENDERUSDT WLDUSDT SUIUSDT SEIUSDT TIAUSDT DYDXUSDT PENDLEUSDT WIFUSDT 1000BONKUSDT 1000FLOKIUSDT ARBUSDT OPUSDT APTUSDT ENAUSDT LDOUSDT"
 
-ok=(); fail=()
+OK=""; FAIL=""
 for S in $SYMS; do
   echo "=== $S"
   if python3 backend/tools/export_klines.py --symbol "$S" \
        --market futures --intervals 1h,4h,1d --start 2023-01-01 --out ./exports; then
-    ok+=("$S")
+    OK="$OK $S"
   else
-    fail+=("$S"); echo "  !! $S 失败（代码不对？未上合约？），继续"
+    FAIL="$FAIL $S"
   fi
 done
-echo; echo "成功: ${ok[*]}"; echo "失败: ${fail[*]}"
+echo
+echo "成功:$OK"
+echo "失败:$FAIL"
 ls -1 ./exports | wc -l    # 期望 60 个文件（20 币 × 3 周期）
 ```
 
-或直接用仓库里的脚本（等价，多了汇总输出）：
+或直接用仓库里的脚本（已经处理好上面这些坑）：
 
 ```bash
-SYMBOLS="DOGEUSDT 1000PEPEUSDT 1000SHIBUSDT XRPUSDT FETUSDT RENDERUSDT WLDUSDT \
-SUIUSDT SEIUSDT TIAUSDT DYDXUSDT PENDLEUSDT WIFUSDT 1000BONKUSDT 1000FLOKIUSDT \
-ARBUSDT OPUSDT APTUSDT ENAUSDT LDOUSDT" bash scripts/fetch_universe.sh
+SYMBOLS="DOGEUSDT 1000PEPEUSDT 1000SHIBUSDT XRPUSDT FETUSDT RENDERUSDT WLDUSDT SUIUSDT SEIUSDT TIAUSDT DYDXUSDT PENDLEUSDT WIFUSDT 1000BONKUSDT 1000FLOKIUSDT ARBUSDT OPUSDT APTUSDT ENAUSDT LDOUSDT" \
+  bash scripts/fetch_universe.sh
 ```
 
 **数据量预估**：3.6 年的 1h 数据每个币约 1.8MB，20 个币三周期合计约 **45MB**

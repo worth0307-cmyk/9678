@@ -140,11 +140,21 @@ XRPUSDT  ADAUSDT  LTCUSDT  LINKUSDT  AVAXUSDT  DOTUSDT  ATOMUSDT  NEARUSDT
 > 所以下面的版本 (a) 开头 `set +H` 关掉历史展开，(b) 符号表写成一行避免
 > 反斜杠续行后面跟空格的问题，(c) 提示语里不含 `!!`。
 > 卡住了按 `Ctrl+C` 退出即可，不会有副作用。
+>
+> **另外必须先 `cd` 到 VI-Dashboard 目录**——`backend/tools/export_klines.py` 是相对路径，
+> 在 `/root` 下跑会 20 个币全部报 "No such file"。下面第一行已经带上了，
+> 并且加了前置检查：路径不对时**一次就退出**，不会刷 20 条一样的报错。
 
 在 VPS 上（`~/VI-Dashboard` 目录里）：
 
 ```bash
 set +H
+cd ~/VI-Dashboard || { echo "找不到 ~/VI-Dashboard"; return 2>/dev/null || exit 1; }
+[ -f backend/tools/export_klines.py ] || {
+  echo "当前在 $PWD，这里没有 backend/tools/export_klines.py"
+  return 2>/dev/null || exit 1
+}
+
 SYMS="DOGEUSDT 1000PEPEUSDT 1000SHIBUSDT XRPUSDT FETUSDT RENDERUSDT WLDUSDT SUIUSDT SEIUSDT TIAUSDT DYDXUSDT PENDLEUSDT WIFUSDT 1000BONKUSDT 1000FLOKIUSDT ARBUSDT OPUSDT APTUSDT ENAUSDT LDOUSDT"
 
 OK=""; FAIL=""

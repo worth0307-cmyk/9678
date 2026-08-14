@@ -18,6 +18,12 @@ cd ~/VI-Dashboard && git fetch origin main && git checkout main && git reset --h
 
 ```bash
 set +H
+cd ~/VI-Dashboard || { echo "找不到 ~/VI-Dashboard"; return 2>/dev/null || exit 1; }
+[ -f backend/tools/export_klines.py ] || {
+  echo "当前在 $PWD，这里没有 backend/tools/export_klines.py"
+  return 2>/dev/null || exit 1
+}
+
 for S in BTCUSDT BNBUSDT ETHUSDT HYPEUSDT SOLUSDT TAOUSDT; do
   echo "=== $S"
   python3 backend/tools/export_klines.py --symbol "$S" \
@@ -30,6 +36,8 @@ ls -1 ./exports
 > 开头那句 `set +H` 是必需的：交互式 bash 默认开启历史展开，
 > **双引号里出现 `!!` 会被替换成上一条命令**，引号随即不配对，终端就卡在 `>` 提示符上。
 > 真卡住了按 `Ctrl+C` 退出，没有副作用。
+> 前两行的 `cd` 和文件检查也不能省：exporter 是相对路径，
+> 在 `/root` 下直接跑会每个币都报 "No such file"。
 
 跑完应该是 **18 个文件**（6 币 × 3 周期），命名形如 `ETHUSDT_4h_2024-01-01_to_now.csv`。
 

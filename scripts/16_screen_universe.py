@@ -58,7 +58,7 @@ def main() -> None:
     ap.add_argument("--target", type=int, default=20, help="target universe size")
     args = ap.parse_args()
 
-    available = D.available_symbols()
+    available = D.available_symbols(require=("1d",))
     core = [s for s in args.core.split(",") if s in available]
     cands = [s for s in available if s not in core]
 

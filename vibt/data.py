@@ -27,9 +27,16 @@ _COLUMN_MAP = {
 TF_MINUTES = {"1h": 60, "4h": 240, "1d": 1440}
 
 
-def available_symbols(data_dir: Path | None = None) -> list[str]:
-    """Symbols that have all three timeframes present in the data directory."""
+def available_symbols(data_dir: Path | None = None,
+                      require: tuple[str, ...] = ("1h", "4h", "1d")) -> list[str]:
+    """Symbols holding every timeframe in `require`.
+
+    Screening a wide universe only needs daily bars, and exporting 1h for
+    thirty-odd symbols is most of the download for data the cross-sectional
+    work never reads -- so pass require=("1d",) to see daily-only symbols too.
+    """
     data_dir = data_dir or DATA_DIR
+    need = set(require)
     by_symbol: dict[str, set[str]] = {}
     for p in data_dir.glob("*_*.csv"):
         stem = p.stem
@@ -38,7 +45,7 @@ def available_symbols(data_dir: Path | None = None) -> list[str]:
         sym, _, tf = stem.rpartition("_")
         if tf in TF_MINUTES:
             by_symbol.setdefault(sym, set()).add(tf)
-    return sorted(s for s, tfs in by_symbol.items() if tfs >= {"1h", "4h", "1d"})
+    return sorted(s for s, tfs in by_symbol.items() if tfs >= need)
 
 
 def load(tf: str, data_dir: Path | None = None,
@@ -63,16 +70,18 @@ def load(tf: str, data_dir: Path | None = None,
     return df
 
 
-def load_all(data_dir: Path | None = None,
-             symbol: str = DEFAULT_SYMBOL) -> dict[str, pd.DataFrame]:
-    return {tf: load(tf, data_dir, symbol) for tf in ("1h", "4h", "1d")}
+def load_all(data_dir: Path | None = None, symbol: str = DEFAULT_SYMBOL,
+             tfs: tuple[str, ...] = ("1h", "4h", "1d")) -> dict[str, pd.DataFrame]:
+    return {tf: load(tf, data_dir, symbol) for tf in tfs}
 
 
 def load_universe(symbols: list[str] | None = None,
-                  data_dir: Path | None = None) -> dict[str, dict[str, pd.DataFrame]]:
-    """{symbol: {tf: frame}} for every symbol that has a complete set of files."""
-    symbols = symbols or available_symbols(data_dir)
-    return {s: load_all(data_dir, s) for s in symbols}
+                  data_dir: Path | None = None,
+                  tfs: tuple[str, ...] = ("1h", "4h", "1d")
+                  ) -> dict[str, dict[str, pd.DataFrame]]:
+    """{symbol: {tf: frame}} for symbols holding every timeframe in `tfs`."""
+    symbols = symbols or available_symbols(data_dir, require=tfs)
+    return {s: load_all(data_dir, s, tfs) for s in symbols}
 
 
 def gap_report(df: pd.DataFrame, tf: str) -> pd.DataFrame:

@@ -39,8 +39,8 @@ def show(name: str, res: B.Result, bench: pd.Series, rows: list) -> None:
 
 
 def main() -> None:
-    symbols = D.available_symbols()
-    universe = D.load_universe(symbols)
+    symbols = D.available_symbols(require=("1d",))
+    universe = D.load_universe(symbols, tfs=("1d",))
     px = X.price_panel(universe, "1d", "open")
     print("=" * 190)
     print(f"CROSS-SECTIONAL STUDY   {symbols}   {px.index[0].date()} .. {px.index[-1].date()}")

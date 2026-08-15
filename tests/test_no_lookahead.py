@@ -186,16 +186,26 @@ def test_vortex_matches_dashboard_implementation(daily):
         assert abs(ours[i] - ref) < 1e-9, f"bar {i}: {ours[i]} vs dashboard {ref}"
 
 
+def _export_as_plain_csv(tf: str, target: Path, symbol: str = "BTCUSDT") -> None:
+    """Write a stored data file out as an uncompressed CSV, whatever form it is in.
+
+    The ingest tests simulate a fresh export, and the exporter always emits plain
+    CSV.  Copying the bytes would smuggle gzip content into a `.csv` name once the
+    repository stores that symbol compressed.
+    """
+    src = D.resolve(tf, D.DATA_DIR, symbol)
+    pd.read_csv(src, encoding="utf-8-sig").to_csv(target, index=False, encoding="utf-8-sig")
+
+
 def test_multi_symbol_loader_roundtrip(tmp_path):
     """A second symbol dropped into the data dir must load like the first."""
     from vibt import ingest as ING
 
     src = tmp_path / "exports"
     src.mkdir()
-    original = D.DATA_DIR / "BTCUSDT_1d.csv"
+    original = D.resolve("1d", D.DATA_DIR, "BTCUSDT")
     for tf in ("1h", "4h", "1d"):
-        shutil.copyfile(D.DATA_DIR / f"BTCUSDT_{tf}.csv",
-                        src / f"FAKEUSDT_{tf}_2024-01-01_to_now.csv")
+        _export_as_plain_csv(tf, src / f"FAKEUSDT_{tf}_2024-01-01_to_now.csv")
     assert ING.parse_name(Path("FAKEUSDT_4h_2024-01-01_to_now.csv")) == ("FAKEUSDT", "4h")
 
     dest = tmp_path / "data"
@@ -224,7 +234,7 @@ def test_ingest_keeps_the_longest_history(tmp_path):
 
     src = tmp_path / "exports"
     src.mkdir()
-    short = pd.read_csv(D.DATA_DIR / "BTCUSDT_1d.csv", encoding="utf-8-sig")
+    short = pd.read_csv(D.resolve("1d", D.DATA_DIR, "BTCUSDT"), encoding="utf-8-sig")
     ts = pd.to_datetime(short.iloc[:, 0])
     pre = pd.DataFrame({short.columns[0]: [ts.iloc[0] - pd.Timedelta(days=k)
                                            for k in range(200, 0, -1)]})
@@ -262,8 +272,7 @@ def test_gzipped_data_reads_identically(tmp_path):
     src = tmp_path / "exports"
     src.mkdir()
     for tf in ("1h", "4h", "1d"):
-        shutil.copyfile(D.DATA_DIR / f"BTCUSDT_{tf}.csv",
-                        src / f"ZIPUSDT_{tf}_2023-01-01_to_now.csv")
+        _export_as_plain_csv(tf, src / f"ZIPUSDT_{tf}_2023-01-01_to_now.csv")
     dest = tmp_path / "data"
     ING.ingest(src, dest, compress=True)
 
@@ -284,8 +293,7 @@ def test_plain_and_gzip_can_coexist(tmp_path):
     src = tmp_path / "exports"
     src.mkdir()
     for tf in ("1h", "4h", "1d"):
-        shutil.copyfile(D.DATA_DIR / f"BTCUSDT_{tf}.csv",
-                        src / f"MIXUSDT_{tf}_2023-01-01_to_now.csv")
+        _export_as_plain_csv(tf, src / f"MIXUSDT_{tf}_2023-01-01_to_now.csv")
     dest = tmp_path / "data"
 
     ING.ingest(src, dest, compress=False)
@@ -348,3 +356,52 @@ def test_exposure_within_bounds(daily):
     s = SYS.target_exposure(daily, p)
     assert s.max() <= p.max_leverage + 1e-9
     assert s.min() >= -p.max_leverage * p.short_size - 1e-9
+
+
+def test_risk_parity_stands_flat_when_a_leg_cannot_be_sized():
+    """If every name on one side has unknown vol, the book must go flat.
+
+    Dropping the unsizeable names and renormalising the rest leaves gross/2 on a
+    single side -- a directional bet labelled market-neutral.  The feature needs
+    14 bars and the vol estimate needs 30, so a recently listed name really can
+    be selectable and unsizeable at once.
+    """
+    from vibt import xsec as X
+
+    idx = pd.date_range("2024-01-01", periods=3, freq="D")
+    cols = ["AAA", "BBB", "CCC", "DDD"]
+    w = pd.DataFrame(0.0, index=idx, columns=cols)
+    w[["AAA", "BBB"]] = 0.25          # long leg
+    w[["CCC", "DDD"]] = -0.25         # short leg
+
+    vol = pd.DataFrame(0.5, index=idx, columns=cols)
+    vol.loc[idx[1], ["CCC", "DDD"]] = np.nan   # whole short leg unsizeable
+    vol.loc[idx[2], "CCC"] = np.nan            # only part of the leg
+
+    rp = X.risk_parity(w, vol)
+    net, gross = rp.sum(axis=1), rp.abs().sum(axis=1)
+
+    assert abs(net.loc[idx[0]]) < 1e-12 and abs(gross.loc[idx[0]] - 1.0) < 1e-12
+    assert (rp.loc[idx[1]] == 0).all(), "one-sided book was not flattened"
+    # A partly-sizeable leg still trades: the survivor carries that leg alone.
+    assert abs(net.loc[idx[2]]) < 1e-12 and abs(gross.loc[idx[2]] - 1.0) < 1e-12
+    assert rp.loc[idx[2], "DDD"] < 0 and rp.loc[idx[2], "CCC"] == 0
+
+
+def test_cross_check_reports_bar_counts_not_just_a_maximum():
+    """One corrupted close must read as 1 differing bar, not as a scary maximum."""
+    from vibt import ingest as ING
+
+    hourly = D.load("1h", symbol="BTCUSDT").head(400)
+    built = D.resample_from(hourly, "4h")
+    given = built.copy()
+
+    n, bad = ING.disagreeing_bars(built, given)
+    assert n == len(given) and len(bad) == 0
+
+    ts = given.index[5]
+    given.loc[ts, "close"] *= 1.02
+    n, bad = ING.disagreeing_bars(built, given)
+    assert n == len(given), "comparison silently shrank"
+    assert list(bad.index) == [ts]
+    assert 0.019 < bad.iloc[0] < 0.021

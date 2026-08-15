@@ -89,16 +89,24 @@ def risk_parity(weights: pd.DataFrame, vol: pd.DataFrame,
     -- the long leg stays long and the short leg stays short.  Getting that wrong
     silently turns a dollar-neutral book into a long-only one (it shows up as a
     beta near +0.9 instead of ~0, which is the check worth running afterwards).
+
+    A name whose vol is unknown cannot be sized, so it is dropped.  When that
+    empties one leg entirely the book stands flat for the day: renormalising the
+    survivors would leave gross/2 on one side only, which is a directional bet
+    wearing a market-neutral label.  This is not hypothetical -- the feature
+    needs 14 bars but the vol estimate needs 30, so any name listed in between
+    is selectable and unsizeable at the same time, and a freshly listed pair
+    (1000FLOKI + 1000PEPE, May 2023) put the whole short leg in that state.
     """
     iv = (1.0 / vol.reindex(weights.index).reindex(columns=weights.columns))
     iv = iv.replace([np.inf, -np.inf], np.nan)
-    x = (weights * iv).fillna(0.0)
+    x = weights * iv
+    x = x.where(np.isfinite(x), 0.0)
     longs, shorts = x.clip(lower=0), (-x).clip(lower=0)
-    ls = longs.sum(axis=1).replace(0, np.nan)
-    ss = shorts.sum(axis=1).replace(0, np.nan)
-    out = (longs.div(ls, axis=0) * gross / 2).fillna(0.0) \
-        - (shorts.div(ss, axis=0) * gross / 2).fillna(0.0)
-    return out
+    ls, ss = longs.sum(axis=1), shorts.sum(axis=1)
+    out = (longs.div(ls.replace(0, np.nan), axis=0) * gross / 2).fillna(0.0) \
+        - (shorts.div(ss.replace(0, np.nan), axis=0) * gross / 2).fillna(0.0)
+    return out.where((ls > 0) & (ss > 0), 0.0)
 
 
 def run(

@@ -116,22 +116,59 @@ def _load_direct(path: Path, tf: str) -> pd.DataFrame:
     return df
 
 
-def cross_check(dest: Path | None = None) -> None:
-    """Rebuild 4h/1d from 1h per symbol and confirm the files agree."""
+def disagreeing_bars(built: pd.DataFrame, given: pd.DataFrame,
+                     tol: float = 1e-9) -> tuple[int, pd.Series]:
+    """Bars where a rebuilt higher timeframe differs from the supplied one.
+
+    Returns (bars compared, worst per-bar relative difference for the ones that
+    disagree).  The *count* is the number that matters.  A single bad close
+    makes the largest relative difference look exactly like wholesale
+    corruption, so reporting only a maximum turns a two-bar artefact into a
+    scare -- which is precisely what the first version of this check did.
+    """
+    common = built.index.intersection(given.index)
+    if not len(common):
+        return 0, pd.Series(dtype=float)
+    rel = ((built.loc[common] - given.loc[common]).abs() / given.loc[common]).max(axis=1)
+    return len(common), rel[rel > tol]
+
+
+def cross_check(dest: Path | None = None, show: int = 4) -> None:
+    """Rebuild each timeframe from the one below it and confirm the files agree.
+
+    1d is rebuilt from 4h as well as from 1h: daily OHLC only reads the first
+    open, the last close and the extremes, so a 4h file can carry a wrong
+    intermediate close and still aggregate to a perfect day.
+    """
     dest = dest or D.DATA_DIR
+    seen: dict[tuple[str, pd.Timestamp], int] = {}
     for symbol in D.available_symbols(dest):
         f = D.load_all(dest, symbol)
         msgs = []
-        for tf, rule in (("4h", "4h"), ("1d", "1D")):
-            built = D.resample_from(f["1h"], rule)
-            given = f[tf][["open", "high", "low", "close"]]
-            common = built.index.intersection(given.index)
-            if not len(common):
-                msgs.append(f"{tf}: no overlap")
+        for src, tf, rule in (("1h", "4h", "4h"), ("1h", "1d", "1D"), ("4h", "1d", "1D")):
+            n, bad = disagreeing_bars(D.resample_from(f[src], rule),
+                                      f[tf][["open", "high", "low", "close"]])
+            if not n:
+                msgs.append(f"{src}->{tf}: no overlap")
                 continue
-            rel = ((built.loc[common] - given.loc[common]).abs() / given.loc[common]).max().max()
-            msgs.append(f"{tf}: {len(common)} shared bars, max rel diff {rel:.1e}")
-        print(f"  {symbol:<10} " + "   ".join(msgs))
+            msgs.append(f"{src}->{tf}: {len(bad)}/{n}"
+                        + (f" (worst {bad.max():.1e})" if len(bad) else ""))
+            for ts in bad.index:
+                seen[(f"{src}->{tf}", ts)] = seen.get((f"{src}->{tf}", ts), 0) + 1
+        print(f"  {symbol:<14} " + "   ".join(msgs))
+
+    if not seen:
+        print("\n  every timeframe reconstructs exactly from the one below it")
+        return
+    # A timestamp that disagrees across many symbols at once is an exchange-side
+    # event, not a per-symbol data error.  Ranking by how many symbols share a
+    # timestamp is what separates the two without reading 26 rows by hand.
+    ranked = sorted(seen.items(), key=lambda kv: (-kv[1], kv[1]))
+    print(f"\n  bars that disagree, most widely shared first "
+          f"({len(ranked)} distinct, showing {min(show, len(ranked))}):")
+    for (pair, ts), count in ranked[:show]:
+        note = "  <- exchange-wide, not a per-symbol fault" if count > 2 else ""
+        print(f"    {pair}  {ts}  {count} symbol(s){note}")
 
 
 def main() -> None:

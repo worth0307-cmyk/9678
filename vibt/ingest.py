@@ -100,8 +100,9 @@ def ingest(src: Path, dest: Path | None = None, dry_run: bool = False,
             except FileNotFoundError:
                 old = None
             if old is not None:
-                df, info = merge_frames(old[["open", "high", "low", "close"]].assign(
-                    close_time=old["close_time"]), df)
+                # Keep whatever columns the stored file has -- subsetting to OHLC
+                # here would drop volume from the old side on every refresh.
+                df, info = merge_frames(old, df)
                 extra = {"added": info["added"], "overlap": info["overlap"],
                          "restated": len(info["restated"])}
                 if info["restated"]:
@@ -135,6 +136,9 @@ def _write(df: pd.DataFrame, target: Path, compress: bool) -> None:
         "日期时间(北京)": (df.index + pd.Timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S"),
         "开盘": df["open"], "最高": df["high"], "最低": df["low"], "收盘": df["close"],
     })
+    for c in D.EXTRA_COLS:                 # volume survives a merge, or it was
+        if c in df.columns:                # never worth fetching in the first place
+            out[c] = df[c].to_numpy()
     out.to_csv(target, index=False, encoding="utf-8-sig",
                compression="gzip" if compress else None)
 
@@ -174,7 +178,8 @@ def _load_direct(path: Path, tf: str) -> pd.DataFrame:
     df = pd.read_csv(path, encoding="utf-8-sig").rename(columns=D._COLUMN_MAP)
     df["ts"] = pd.to_datetime(df["ts"]) - pd.Timedelta(hours=8)
     df = df.set_index("ts").sort_index()
-    df = df[~df.index.duplicated(keep="last")][["open", "high", "low", "close"]].astype(float)
+    keep = ["open", "high", "low", "close"] + [c for c in D.EXTRA_COLS if c in df.columns]
+    df = df[~df.index.duplicated(keep="last")][keep].astype(float)
     df.index.name = "open_time"
     df["close_time"] = df.index + pd.Timedelta(minutes=D.TF_MINUTES[tf])
     return df

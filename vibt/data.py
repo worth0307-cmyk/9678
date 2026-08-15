@@ -26,6 +26,11 @@ _COLUMN_MAP = {
 
 TF_MINUTES = {"1h": 60, "4h": 240, "1d": 1440}
 
+# Older exports carry OHLC only; files pulled straight from the exchange also
+# carry these.  They are kept when present and simply absent otherwise, so both
+# vintages load through the same path.
+EXTRA_COLS = ["volume", "quote_volume", "trades", "taker_buy_base", "taker_buy_quote"]
+
 
 def available_symbols(data_dir: Path | None = None,
                       require: tuple[str, ...] = ("1h", "4h", "1d")) -> list[str]:
@@ -81,7 +86,8 @@ def load(tf: str, data_dir: Path | None = None,
     df["ts"] = pd.to_datetime(df["ts"]) - pd.Timedelta(hours=8)  # Beijing -> UTC
     df = df.set_index("ts").sort_index()
     df = df[~df.index.duplicated(keep="last")]
-    df = df[["open", "high", "low", "close"]].astype(float)
+    keep = ["open", "high", "low", "close"] + [c for c in EXTRA_COLS if c in df.columns]
+    df = df[keep].astype(float)
     df.index.name = "open_time"
 
     # close_time is what an executor is actually allowed to know the bar by.

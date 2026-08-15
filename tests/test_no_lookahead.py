@@ -476,3 +476,50 @@ def test_merge_separates_a_restatement_from_a_forming_last_bar():
     old2.loc[victim, "high"] *= 1.05
     _, info2 = ING.merge_frames(old2, new)
     assert info2["restated"] == [victim]
+
+
+def test_volume_survives_ingest_and_merge(tmp_path):
+    """Volume columns must round-trip, including through an incremental merge.
+
+    The whole point of re-pulling the existing symbols is the volume field: the
+    6.5bp cost assumption every backtest rests on has never been checked against
+    how much these names actually trade.  Dropping the column anywhere in the
+    pipeline would make that pull worthless while every other check still passed.
+    """
+    from vibt import ingest as ING
+
+    idx = pd.date_range("2024-01-01", periods=200, freq="D")
+    base = pd.DataFrame({
+        "开盘": np.linspace(100, 300, 200), "最高": np.linspace(101, 303, 200),
+        "最低": np.linspace(99, 297, 200), "收盘": np.linspace(100.5, 301, 200),
+        "volume": np.arange(200, dtype=float) + 1000,
+        "quote_volume": (np.arange(200, dtype=float) + 1000) * 200,
+        "trades": np.arange(200, dtype=float) + 50,
+        "taker_buy_base": (np.arange(200, dtype=float) + 1000) / 2,
+        "taker_buy_quote": (np.arange(200, dtype=float) + 1000) * 100,
+    })
+    base.insert(0, "日期时间(北京)", (idx + pd.Timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S"))
+
+    src, dest = tmp_path / "pull", tmp_path / "data"
+    src.mkdir(); dest.mkdir()
+    base.iloc[:150].to_csv(src / "VOLUSDT_1d_2024-01-01_to_now.csv",
+                           index=False, encoding="utf-8-sig")
+    ING.ingest(src, dest, compress=True)
+
+    got = D.load("1d", dest, "VOLUSDT")
+    for c in D.EXTRA_COLS:
+        assert c in got.columns, f"{c} was dropped by ingest"
+    assert got["volume"].iloc[0] == 1000.0
+    assert got["trades"].iloc[-1] == 50.0 + 149
+
+    # An incremental refresh must not wipe volume off the bars it is splicing onto.
+    src2 = tmp_path / "refresh"; src2.mkdir()
+    base.iloc[140:].to_csv(src2 / "VOLUSDT_1d_refresh.csv", index=False, encoding="utf-8-sig")
+    rep = ING.ingest(src2, dest, compress=True, merge=True)
+    assert rep.iloc[0]["added"] == 50
+
+    merged = D.load("1d", dest, "VOLUSDT")
+    assert len(merged) == 200
+    assert merged["volume"].notna().all(), "merge left holes in volume"
+    assert merged["volume"].iloc[0] == 1000.0        # from the old side
+    assert merged["volume"].iloc[-1] == 1000.0 + 199  # from the new side

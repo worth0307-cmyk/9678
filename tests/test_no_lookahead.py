@@ -405,3 +405,74 @@ def test_cross_check_reports_bar_counts_not_just_a_maximum():
     assert n == len(given), "comparison silently shrank"
     assert list(bad.index) == [ts]
     assert 0.019 < bad.iloc[0] < 0.021
+
+
+def test_incremental_merge_restores_the_full_history(tmp_path):
+    """Splice a recent slice onto truncated history and get the original back.
+
+    An incremental export covers only the last few days.  Without merging it
+    would REPLACE the stored file, silently destroying years of history while
+    every integrity check still passed -- the short file is perfectly valid.
+    """
+    from vibt import ingest as ING
+
+    full = D.load("1d", symbol="BTCUSDT")
+    dest = tmp_path / "data"
+    dest.mkdir()
+
+    # Stored history stops 30 bars short of what the exchange now has.
+    ING._write(full.iloc[:-30], dest / "BTCUSDT_1d.csv", compress=False)
+    assert len(D.load("1d", dest, "BTCUSDT")) == len(full) - 30
+
+    # A refresh fetches the last 50 bars, overlapping the stored tail by 20.
+    src = tmp_path / "exports"
+    src.mkdir()
+    ING._write(full.iloc[-50:], src / "BTCUSDT_1d_refresh.csv", compress=False)
+
+    report = ING.ingest(src, dest, merge=True)
+    assert report.iloc[0]["added"] == 30
+    assert report.iloc[0]["overlap"] == 20
+    assert report.iloc[0]["restated"] == 0
+
+    got = D.load("1d", dest, "BTCUSDT")
+    pd.testing.assert_frame_equal(got, full)
+
+
+def test_merge_without_it_would_have_truncated(tmp_path):
+    """The same refresh without --merge replaces history: that is the hazard."""
+    from vibt import ingest as ING
+
+    full = D.load("1d", symbol="BTCUSDT")
+    dest = tmp_path / "data"
+    dest.mkdir()
+    ING._write(full.iloc[:-30], dest / "BTCUSDT_1d.csv", compress=False)
+
+    src = tmp_path / "exports"
+    src.mkdir()
+    ING._write(full.iloc[-50:], src / "BTCUSDT_1d_refresh.csv", compress=False)
+
+    ING.ingest(src, dest, merge=False)
+    assert len(D.load("1d", dest, "BTCUSDT")) == 50, "non-merge should replace"
+
+
+def test_merge_separates_a_restatement_from_a_forming_last_bar():
+    """A changed final bar is normal; a changed settled bar is not."""
+    from vibt import ingest as ING
+
+    full = D.load("1d", symbol="BTCUSDT").iloc[-40:]
+    old = full.iloc[:-10].copy()
+    new = full.iloc[-20:].copy()
+
+    # The previous export's last bar was still forming, so it reads low.
+    old.iloc[-1, old.columns.get_loc("close")] *= 0.97
+    merged, info = ING.merge_frames(old, new)
+    assert info["restated"] == [], "a forming final bar is not a restatement"
+    assert info["tail_revised"] is True
+    assert merged["close"].iloc[len(old) - 1] == new["close"].loc[old.index[-1]]
+
+    # A settled bar changing is a real restatement and must be surfaced.
+    old2 = full.iloc[:-10].copy()
+    victim = old2.index[-5]
+    old2.loc[victim, "high"] *= 1.05
+    _, info2 = ING.merge_frames(old2, new)
+    assert info2["restated"] == [victim]

@@ -56,7 +56,7 @@ def check(df: pd.DataFrame, tf: str) -> dict:
 
 
 def ingest(src: Path, dest: Path | None = None, dry_run: bool = False,
-           compress: bool = False) -> pd.DataFrame:
+           compress: bool = False, merge: bool = False) -> pd.DataFrame:
     """Copy the exports into data/, one file per (symbol, timeframe).
 
     Exporting the same symbol twice with different --start leaves two files for
@@ -92,18 +92,82 @@ def ingest(src: Path, dest: Path | None = None, dry_run: bool = False,
                   f"{other_df.index[0].date()})  <  keeping {path.name} "
                   f"({len(df)} bars from {df.index[0].date()})")
         target = dest / (f"{symbol}_{tf}.csv.gz" if compress else f"{symbol}_{tf}.csv")
+
+        extra: dict = {}
+        if merge:
+            try:
+                old = D.load(tf, dest, symbol)
+            except FileNotFoundError:
+                old = None
+            if old is not None:
+                df, info = merge_frames(old[["open", "high", "low", "close"]].assign(
+                    close_time=old["close_time"]), df)
+                extra = {"added": info["added"], "overlap": info["overlap"],
+                         "restated": len(info["restated"])}
+                if info["restated"]:
+                    shown = ", ".join(str(t) for t in info["restated"][:3])
+                    print(f"  RESTATED {symbol} {tf}: the exchange changed "
+                          f"{len(info['restated'])} settled bar(s) ({shown})"
+                          + (" ..." if len(info["restated"]) > 3 else ""))
+                elif info["added"] == 0:
+                    print(f"  {symbol} {tf}: already current, nothing new")
+
         if not dry_run:
             # Drop the other form so a symbol never has both a stale .csv and a
             # fresh .csv.gz, which would silently resolve to the stale one.
             other = dest / (f"{symbol}_{tf}.csv" if compress else f"{symbol}_{tf}.csv.gz")
             other.unlink(missing_ok=True)
-            if compress:
+            if merge:
+                _write(df, target, compress)
+            elif compress:
                 with open(path, "rb") as fi, gzip.open(target, "wb") as fo:
                     shutil.copyfileobj(fi, fo)
             else:
                 shutil.copyfile(path, target)
-        rows.append({"symbol": symbol, "tf": tf, "source": path.name, **check(df, tf)})
+        rows.append({"symbol": symbol, "tf": tf, "source": path.name,
+                     **check(df, tf), **extra})
     return pd.DataFrame(rows)
+
+
+def _write(df: pd.DataFrame, target: Path, compress: bool) -> None:
+    """Write a frame back in the exporter's own format: Beijing time, its headers."""
+    out = pd.DataFrame({
+        "日期时间(北京)": (df.index + pd.Timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S"),
+        "开盘": df["open"], "最高": df["high"], "最低": df["low"], "收盘": df["close"],
+    })
+    out.to_csv(target, index=False, encoding="utf-8-sig",
+               compression="gzip" if compress else None)
+
+
+def merge_frames(old: pd.DataFrame, new: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Splice an incremental export onto stored history, newest data winning.
+
+    New data wins on overlap because the previous export's final bar was very
+    likely still forming when it was taken -- Binance returns the in-progress
+    candle -- so that bar legitimately differs and the fresh copy is the
+    complete one.  Any disagreement *before* that last bar is a different animal
+    entirely: it means the exchange restated settled history, which silently
+    invalidates every backtest run against the old copy.  The two are counted
+    separately so the second can never hide inside the first.
+    """
+    cols = ["open", "high", "low", "close"]
+    overlap = old.index.intersection(new.index)
+    restated = []
+    if len(overlap):
+        diff = (old.loc[overlap, cols] - new.loc[overlap, cols]).abs()
+        scale = old.loc[overlap, cols].abs().clip(lower=1e-12)
+        moved = ((diff / scale) > 1e-9).any(axis=1)
+        restated = [t for t in overlap[moved] if t != old.index[-1]]
+
+    combined = pd.concat([old[~old.index.isin(new.index)], new]).sort_index()
+    return combined, {
+        "added": int(len(combined) - len(old)),
+        "overlap": int(len(overlap)),
+        "restated": restated,
+        "tail_revised": bool(len(overlap) and old.index[-1] in overlap
+                             and not old.loc[old.index[-1], cols]
+                             .equals(new.loc[old.index[-1], cols])),
+    }
 
 
 def _load_direct(path: Path, tf: str) -> pd.DataFrame:
@@ -178,9 +242,12 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="report only, write nothing")
     ap.add_argument("--gzip", action="store_true",
                     help="store as .csv.gz (~4x smaller; loaders read it transparently)")
+    ap.add_argument("--merge", action="store_true",
+                    help="splice onto existing history instead of replacing it "
+                         "(use for incremental refreshes)")
     args = ap.parse_args()
 
-    report = ingest(args.src, args.dest, args.dry_run, args.gzip)
+    report = ingest(args.src, args.dest, args.dry_run, args.gzip, args.merge)
     if report.empty:
         print("nothing ingested")
         return

@@ -109,6 +109,60 @@ python -m vibt.ingest "<导出目录>" --gzip     # 以后补数据时这样跑
 > `cross_check` 报告的是**有多少根对不上**，不只是最大相对偏差——
 > 一根错误的收盘价会让"最大偏差"和整份数据损坏长得一模一样。
 
+## 3c. 以后取新数据：增量刷新（`scripts/refresh.sh`）
+
+历史已经在库里了，所以以后**只需要取增量**，不用再全量导一次。
+
+**在 VPS 上：**
+
+```bash
+ssh vpn-sg
+cd ~/VI-Dashboard && git fetch origin main && git checkout main && git reset --hard origin/main
+bash refresh.sh            # 默认最近 10 天，26 个币，三个周期
+bash refresh.sh 30         # 想多取一点就传天数
+```
+
+（`refresh.sh` 在本仓库 `scripts/` 下，拷到 VPS 上或直接 `bash /path/to/9678/scripts/refresh.sh`。）
+
+它会留下一个 `~/vi_refresh_<日期>.zip`：
+
+| 取多久 | 大小 |
+|---|---|
+| 全量历史 | ~57MB |
+| **最近 10 天** | **~200KB** |
+| 最近 30 天 | ~600KB |
+
+**拉回本地：**
+
+```powershell
+scp vpn-sg:~/vi_refresh_20260815.zip "$env:USERPROFILE\Desktop\"
+```
+
+**然后上传，我这边接上去：**
+
+```bash
+python -m vibt.ingest <解压目录> --gzip --merge
+```
+
+### `--merge` 为什么是必需的
+
+**不加 `--merge`，那份 10 天的文件会把整段历史覆盖掉**——而且所有完整性检查都会通过，
+因为一份只有 10 天的文件本身完全合法。有测试专门守着这条
+（`test_merge_without_it_would_have_truncated`）。
+
+`--merge` 做三件事：
+
+1. **拼接**：新旧按时间并集，重叠部分以新数据为准。
+2. **区分两种重叠不一致**：
+   - 上次导出时**最后一根 K 线还没走完**（币安会返回进行中的那根）——正常，静默用新的覆盖。
+   - **已经收盘的历史 K 线被改了**——交易所回填/订正，这会让之前所有回测失效，
+     所以单独计数并打印 `RESTATED` 警告。
+3. **报告**：每个币每个周期新增了多少根、重叠多少根、有几根被订正。
+
+刻意留 10 天重叠就是为了让第 2 条有东西可查。**别把它压到 1 天。**
+
+---
+
 ## 4. 跑池化研究
 
 ```bash

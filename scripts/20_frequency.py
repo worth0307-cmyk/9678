@@ -4,10 +4,11 @@ Controlled comparison: same universe, same rule, same calendar-time lookback and
 holding period, only the bar size changes.  14 daily bars = 84 4h bars = 336 1h
 bars; rebalancing every 3 days = every 18 4h bars = every 72 1h bars.
 
-Only the six original symbols have all three timeframes, so the universe is
-those six.  That universe is too small for the cross-section to work well on its
-own -- REPORT_XSEC section 3 -- so read the DIFFERENCE between frequencies here,
-not the level.
+All 26 symbols now carry all three timeframes, so this runs on the same universe
+and the same top/bottom-5 construction as the headline daily strategy.  Earlier
+versions were stuck with the six symbols that happened to have intraday data,
+which was too small for the cross-section to work at all -- so the numbers here
+supersede that run rather than extending it.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from vibt import backtest as B, data as D, metrics as M, xsec as X  # noqa: E402
 pd.set_option("display.width", 200)
 
 COSTS = B.Costs(fee_bps=4.5, slip_bps=2.0)
+N_SIDE = 5   # matches the headline daily strategy
 REPORTS = Path(__file__).resolve().parent.parent / "reports"
 
 # (timeframe, bars per day, lookback bars = 14 days, rebalance bars = 3 days)
@@ -48,7 +50,7 @@ def main() -> None:
         ann = D.bars_per_year(tf)
         px = X.price_panel(U, tf, "open")
         feat = X.feature_panel(U, lambda d, k=lb: d["close"] / d["close"].shift(k) - 1, tf=tf)
-        w = X.cross_sectional_weights(feat, n_side=2, mode="long_short")
+        w = X.cross_sectional_weights(feat, n_side=N_SIDE, mode="long_short")
         res = X.run(px, w, COSTS, ann, "", rb)
         yrs = len(res.rets) / ann
         rows.append({"tf": tf, "sharpe": res.stats.sharpe, "ret": res.stats.total_return,
@@ -72,7 +74,7 @@ def main() -> None:
     U1 = D.load_universe(syms, tfs=("1d",))
     px1 = X.price_panel(U1, "1d", "open")
     f1 = X.feature_panel(U1, lambda d: d["close"] / d["close"].shift(14) - 1)
-    w1 = X.cross_sectional_weights(f1, n_side=2, mode="long_short")
+    w1 = X.cross_sectional_weights(f1, n_side=N_SIDE, mode="long_short")
     print(f"  {'再平衡间隔':<12}{'Sharpe':>9}{'收益':>10}{'年化成本':>10}")
     for rb in (1, 2, 3, 5, 7, 14):
         res = X.run(px1, w1, COSTS, 365.0, "", rb)
@@ -90,7 +92,7 @@ def main() -> None:
         ann = D.bars_per_year(tf)
         px = X.price_panel(U, tf, "open")
         feat = X.feature_panel(U, lambda d, k=lb: d["close"] / d["close"].shift(k) - 1, tf=tf)
-        w = X.cross_sectional_weights(feat, n_side=2, mode="long_short")
+        w = X.cross_sectional_weights(feat, n_side=N_SIDE, mode="long_short")
         cells = []
         for fee, slip in ((0, 0), (2, 1), (4.5, 2), (4.5, 8), (15, 15)):
             r = X.run(px, w, B.Costs(fee, slip), ann, "", rb)
@@ -106,9 +108,8 @@ def main() -> None:
   最好的粒度是 {best['tf']}（Sharpe {best['sharpe']:+.2f}），日线是 {d1['sharpe']:+.2f}。
   差距 {best['sharpe']-d1['sharpe']:+.2f}。
 
-  注意这只是 6 个币的结果，而 6 个币的横截面本来就很弱
-  （REPORT_XSEC 第 3 节：只用 4 个主流币时 Sharpe 是 -0.07）。
-  所以这里该读的是**频率之间的差**，不是绝对水平。
+  这是 26 个币、top/bottom-5 的结果，和主策略同一个口径，
+  所以绝对水平和 REPORT_XSEC 的主结果可比，不只是频率之间的相对差。
 """)
 
 

@@ -46,9 +46,13 @@ class BandParams:
     range_up: float = 0.80          # screenshot sits at 79.6% (4H) / 85.7% (1D)
     range_dn: float = 0.20
 
-    # "fade"   = short the up-breakout, long the down-breakout (the dashboard rule)
-    # "follow" = the opposite sign
-    # "regime" = the breakout is only a TRIGGER; the daily trend picks the side
+    # "fade"      = short the up-breakout, long the down-breakout (the dashboard rule)
+    # "follow"    = the opposite sign: long the up-break, short the down-break
+    # "long_only" = long EITHER break.  Not a stylistic variant of "follow": the
+    #               event study finds price rises after a band exit in both
+    #               directions, so "follow" still has the down-break side pointed
+    #               the wrong way.  This is the sign the measurement implies.
+    # "regime"    = the breakout is only a TRIGGER; the daily trend picks the side
     direction: str = "fade"
 
     base_size: float = 0.5          # size of the first unit, in equity
@@ -186,6 +190,8 @@ def target_position(df: pd.DataFrame, p: BandParams) -> pd.Series:
                         pos[t] = cur
                         continue
                     side = 1.0 if bull[t] > 0.5 else -1.0
+                elif p.direction == "long_only":
+                    side = 1.0
                 else:
                     side = sign * d
                 if p.trend_filter and p.direction != "regime" and np.isfinite(bull[t]):

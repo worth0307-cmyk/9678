@@ -12,9 +12,9 @@ checkout, no pandas.
 
 It gathers three things in one pass:
 
-  1. 1d + 4h klines WITH VOLUME for symbols never used in development, as a
-     clean out-of-sample cross-section.
-  2. 1d + 4h klines WITH VOLUME for the 26 symbols already in the repository.
+  1. Daily klines WITH VOLUME for every eligible symbol never used in
+     development, as a clean out-of-sample cross-section.
+  2. Daily klines WITH VOLUME for the 26 symbols already in the repository.
      The existing files are OHLC only, so the cost assumption those backtests
      rest on (6.5bp per side, applied uniformly) has never been checked against
      how much any of these names actually trades.
@@ -24,10 +24,22 @@ It gathers three things in one pass:
 How the out-of-sample symbols are chosen matters, so the rule is fixed here in
 advance and uses no return information whatsoever: every USDT-margined
 perpetual that is TRADING and was onboarded on or before --onboard-before,
-excluding the ones already in the repository, ordered by onboard date, oldest
-first.  Ranking on anything derived from prices -- volume, volatility, past
-performance -- would quietly re-introduce the selection effect this test exists
-to measure.
+excluding the ones already in the repository.  Ranking on anything derived from
+prices -- volume, volatility, past performance -- would quietly re-introduce the
+selection effect this test exists to measure.
+
+By default it takes ALL of them rather than a capped subset, because any cap
+needs a tiebreaker and every tiebreaker is a choice.  An earlier version took
+the 40 oldest, which is price-blind but not harmless: it returned the entire
+2019-2021 cohort, structurally unlike the 2022-2024 names the strategy was built
+on, so a failure could not be read as the strategy failing rather than the
+sample being different in kind.  Taking everything eligible removes the question.
+
+Only the daily panel is fetched.  Every downstream test -- the out-of-sample
+cross-section, the cost check, funding carry -- reads daily bars, and
+scripts/20_frequency.py already established that daily beats 4h beats 1h even at
+zero cost.  Fetching 4h as well would multiply the download by about six for
+data nothing would read.
 """
 
 from __future__ import annotations
@@ -143,9 +155,17 @@ def beijing(ts_ms: int) -> str:
     return datetime.fromtimestamp(ts_ms / 1000, BEIJING).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def universe(onboard_before: str) -> list[dict]:
+def universe(onboard_before: str) -> tuple[list[dict], set[str]]:
+    """(eligible symbols, every USDT-M perpetual currently listed).
+
+    Both are needed.  Checking the repository's symbols against the *eligible*
+    slice reports every recently-listed name as missing, which reads as
+    "delisted" when it only means "listed after the cutoff".
+    """
     info = get("/fapi/v1/exchangeInfo", {})
     cutoff = ms(onboard_before)
+    listed = {s["symbol"] for s in info["symbols"]
+              if s.get("status") == "TRADING" and s.get("contractType") == "PERPETUAL"}
     out = []
     for s in info["symbols"]:
         if (s.get("status") == "TRADING"
@@ -155,7 +175,7 @@ def universe(onboard_before: str) -> list[dict]:
                 and int(s.get("onboardDate", 0)) <= cutoff):
             out.append({"symbol": s["symbol"], "onboard": int(s["onboardDate"])})
     out.sort(key=lambda x: (x["onboard"], x["symbol"]))
-    return out
+    return out, listed
 
 
 def klines(symbol: str, interval: str, start: int) -> list[list]:
@@ -226,11 +246,14 @@ def main() -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default="./binance_pull", type=Path)
     ap.add_argument("--start", default="2023-01-01")
-    ap.add_argument("--onboard-before", default="2024-01-01",
+    ap.add_argument("--onboard-before", default="2024-07-01",
                     help="out-of-sample names must have listed by this date")
-    ap.add_argument("--new-max", type=int, default=40,
-                    help="how many never-used symbols to take (0 = all eligible)")
-    ap.add_argument("--intervals", default="1d,4h")
+    ap.add_argument("--new-max", type=int, default=0,
+                    help="cap the never-used set (0 = take all eligible, which is "
+                         "the only genuinely selection-free option)")
+    ap.add_argument("--intervals", default="1d",
+                    help="the daily panel is what every downstream test uses; "
+                         "4h costs ~6x the download and nothing reads it")
     ap.add_argument("--skip-funding", action="store_true")
     ap.add_argument("--skip-existing", action="store_true",
                     help="do not re-fetch volume for the 26 already in the repo")
@@ -241,21 +264,26 @@ def main() -> None:
     intervals = [s.strip() for s in args.intervals.split(",") if s.strip()]
 
     print("reading exchangeInfo ...", flush=True)
-    elig = universe(args.onboard_before)
+    elig, listed = universe(args.onboard_before)
     have = set(EXISTING)
     fresh = [u for u in elig if u["symbol"] not in have]
     if args.new_max:
         fresh = fresh[:args.new_max]
     new_syms = [u["symbol"] for u in fresh]
 
-    missing = [s for s in EXISTING if s not in {u["symbol"] for u in elig}]
+    gone = [s for s in EXISTING if s not in listed]
+    too_new = [s for s in EXISTING
+               if s in listed and s not in {u["symbol"] for u in elig}]
     targets = new_syms + ([] if args.skip_existing else EXISTING)
 
     print(f"\n  eligible USDT-M perpetuals onboarded <= {args.onboard_before}: {len(elig)}")
     print(f"  already in the repo                    : {len(EXISTING)}")
     print(f"  never used, taking                     : {len(new_syms)}")
-    if missing:
-        print(f"  NOTE: not in exchangeInfo (renamed/delisted?): {missing}")
+    if gone:
+        print(f"  WARNING: no longer listed (renamed or delisted): {gone}")
+    if too_new:
+        print(f"  (listed after {args.onboard_before}, so not eligible as OOS "
+              f"but still fetched: {too_new})")
     named = [s for s in new_syms if s in NAMED_NEVER_PULLED]
     print(f"    of which named a priori in UNIVERSE.md: {len(named)}  {named}")
     print(f"    never mentioned anywhere              : {len(new_syms) - len(named)}")

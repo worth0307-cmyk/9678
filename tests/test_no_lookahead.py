@@ -523,3 +523,50 @@ def test_volume_survives_ingest_and_merge(tmp_path):
     assert merged["volume"].notna().all(), "merge left holes in volume"
     assert merged["volume"].iloc[0] == 1000.0        # from the old side
     assert merged["volume"].iloc[-1] == 1000.0 + 199  # from the new side
+
+
+def test_grid_realised_curve_hides_the_loss(tmp_path):
+    """The realised curve must stay smooth while the marked account collapses.
+
+    This is the property the whole simulator exists to expose, so it is pinned:
+    on a one-way decline a martingale closes nothing at a loss, so realised P&L
+    barely moves while mark-to-market equity falls apart.  If a refactor ever
+    made the two curves agree, the simulator would have stopped modelling the
+    thing that matters.
+    """
+    from vibt import grid as G
+
+    # A decline deep enough to fill the ladder and keep going, but not deep
+    # enough to liquidate -- liquidation zeroes both curves and would hide the
+    # very divergence being tested.
+    n = 400
+    idx = pd.date_range("2024-01-01", periods=n, freq="h")
+    trend = 100 * (1 - 0.0007) ** np.arange(n)
+    # amplitude must exceed take_profit or no level ever closes and the
+    # win-rate half of the claim cannot be demonstrated
+    px = pd.Series(trend * (1 + 0.015 * np.sin(np.arange(n) / 3)), index=idx)
+    df = pd.DataFrame({"open": px, "high": px * 1.002,
+                       "low": px * 0.998, "close": px})
+
+    r = G.run_grid(df, G.GridParams(max_levels=7, fee=0.0))
+    assert r.liquidated_at is None, "scenario should stop short of liquidation"
+    assert r.closed > 0 and r.win_rate == 1.0, "every closed trade must be a winner"
+    assert r.realised_dd > -0.02, f"realised curve should stay flat, got {r.realised_dd:.3f}"
+    assert r.mark_dd < -0.20, f"marked curve must collapse, got {r.mark_dd:.3f}"
+    assert r.max_levels_used == 7, "a sustained move should fill the whole ladder"
+
+
+def test_grid_ladder_is_filled_adversely_within_the_bar():
+    """Entries the low reaches must fill before take-profits the high reaches.
+
+    Intrabar order is unknowable from OHLC, so the simulator has to assume the
+    order that does not flatter the strategy.  A bar that spans several rungs
+    and also clears a take-profit must add the rungs first.
+    """
+    from vibt import grid as G
+
+    idx = pd.date_range("2024-01-01", periods=2, freq="h")
+    df = pd.DataFrame({"open": [100.0, 100.0], "high": [100.0, 102.0],
+                       "low": [100.0, 96.0], "close": [100.0, 101.0]}, index=idx)
+    r = G.run_grid(df, G.GridParams(step=0.01, take_profit=0.01, max_levels=5, fee=0.0))
+    assert r.max_levels_used >= 4, "the low should have filled several rungs first"

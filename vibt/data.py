@@ -38,8 +38,8 @@ def available_symbols(data_dir: Path | None = None,
     data_dir = data_dir or DATA_DIR
     need = set(require)
     by_symbol: dict[str, set[str]] = {}
-    for p in data_dir.glob("*_*.csv"):
-        stem = p.stem
+    for p in list(data_dir.glob("*_*.csv")) + list(data_dir.glob("*_*.csv.gz")):
+        stem = p.name[:-7] if p.name.endswith(".csv.gz") else p.stem
         if "_" not in stem:
             continue
         sym, _, tf = stem.rpartition("_")
@@ -48,11 +48,30 @@ def available_symbols(data_dir: Path | None = None,
     return sorted(s for s, tfs in by_symbol.items() if tfs >= need)
 
 
+def resolve(tf: str, data_dir: Path, symbol: str) -> Path:
+    """Locate a symbol/timeframe file, preferring plain CSV over gzip.
+
+    1h files for a few dozen symbols run to tens of megabytes; storing them
+    gzipped cuts that by roughly 4x and pandas reads .csv.gz transparently, so
+    both layouts work and can be mixed in one directory.
+    """
+    plain = data_dir / f"{symbol}_{tf}.csv"
+    if plain.exists():
+        return plain
+    gz = data_dir / f"{symbol}_{tf}.csv.gz"
+    if gz.exists():
+        return gz
+    raise FileNotFoundError(
+        f"no data for {symbol} {tf} in {data_dir} "
+        f"(looked for {plain.name} and {gz.name})"
+    )
+
+
 def load(tf: str, data_dir: Path | None = None,
          symbol: str = DEFAULT_SYMBOL) -> pd.DataFrame:
     """Load one timeframe as a UTC-indexed OHLC frame indexed by bar OPEN time."""
     data_dir = data_dir or DATA_DIR
-    path = data_dir / f"{symbol}_{tf}.csv"
+    path = resolve(tf, data_dir, symbol)
     df = pd.read_csv(path, encoding="utf-8-sig")
     df = df.rename(columns=_COLUMN_MAP)
     missing = {"ts", "open", "high", "low", "close"} - set(df.columns)

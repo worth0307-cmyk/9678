@@ -255,6 +255,52 @@ def test_band_study_is_symbol_agnostic(tmp_path):
         assert pos.abs().max() <= p.max_size + 1e-9
 
 
+def test_gzipped_data_reads_identically(tmp_path):
+    """A .csv.gz must load exactly like the .csv, and be discoverable."""
+    from vibt import ingest as ING
+
+    src = tmp_path / "exports"
+    src.mkdir()
+    for tf in ("1h", "4h", "1d"):
+        shutil.copyfile(D.DATA_DIR / f"BTCUSDT_{tf}.csv",
+                        src / f"ZIPUSDT_{tf}_2023-01-01_to_now.csv")
+    dest = tmp_path / "data"
+    ING.ingest(src, dest, compress=True)
+
+    assert not list(dest.glob("*.csv")), "compress=True should not leave plain CSVs"
+    assert len(list(dest.glob("*.csv.gz"))) == 3
+    assert D.available_symbols(dest, require=("1h", "4h", "1d")) == ["ZIPUSDT"]
+    pd.testing.assert_frame_equal(D.load("1d", dest, "ZIPUSDT"), D.load("1d"))
+
+
+def test_plain_and_gzip_can_coexist(tmp_path):
+    """Mixed layouts resolve per file, and re-ingesting swaps rather than shadows.
+
+    Leaving both a stale .csv and a fresh .csv.gz for one symbol would resolve to
+    whichever the lookup prefers, silently serving old data.
+    """
+    from vibt import ingest as ING
+
+    src = tmp_path / "exports"
+    src.mkdir()
+    for tf in ("1h", "4h", "1d"):
+        shutil.copyfile(D.DATA_DIR / f"BTCUSDT_{tf}.csv",
+                        src / f"MIXUSDT_{tf}_2023-01-01_to_now.csv")
+    dest = tmp_path / "data"
+
+    ING.ingest(src, dest, compress=False)
+    assert len(list(dest.glob("*.csv"))) == 3
+    ING.ingest(src, dest, compress=True)      # re-ingest compressed
+    assert not list(dest.glob("MIXUSDT_*.csv")), "stale plain CSV was left behind"
+    assert len(list(dest.glob("MIXUSDT_*.csv.gz"))) == 3
+    assert len(D.load("1h", dest, "MIXUSDT")) == len(D.load("1h"))
+
+
+def test_missing_symbol_error_names_both_forms(tmp_path):
+    with pytest.raises(FileNotFoundError, match=r"NOPEUSDT_1d\.csv.*NOPEUSDT_1d\.csv\.gz"):
+        D.load("1d", tmp_path, "NOPEUSDT")
+
+
 def test_xsec_weights_are_dollar_neutral_and_causal():
     """Long/short weights must net to zero, and risk parity must not flip a leg."""
     from vibt import indicators as I2, xsec as X

@@ -16,6 +16,7 @@ underscore-separated fields.  Run:
 from __future__ import annotations
 
 import argparse
+import gzip
 import re
 import shutil
 from pathlib import Path
@@ -54,7 +55,8 @@ def check(df: pd.DataFrame, tf: str) -> dict:
     }
 
 
-def ingest(src: Path, dest: Path | None = None, dry_run: bool = False) -> pd.DataFrame:
+def ingest(src: Path, dest: Path | None = None, dry_run: bool = False,
+           compress: bool = False) -> pd.DataFrame:
     """Copy the exports into data/, one file per (symbol, timeframe).
 
     Exporting the same symbol twice with different --start leaves two files for
@@ -89,9 +91,17 @@ def ingest(src: Path, dest: Path | None = None, dry_run: bool = False) -> pd.Dat
             print(f"  superseded: {other_path.name} ({len(other_df)} bars from "
                   f"{other_df.index[0].date()})  <  keeping {path.name} "
                   f"({len(df)} bars from {df.index[0].date()})")
-        target = dest / f"{symbol}_{tf}.csv"
+        target = dest / (f"{symbol}_{tf}.csv.gz" if compress else f"{symbol}_{tf}.csv")
         if not dry_run:
-            shutil.copyfile(path, target)
+            # Drop the other form so a symbol never has both a stale .csv and a
+            # fresh .csv.gz, which would silently resolve to the stale one.
+            other = dest / (f"{symbol}_{tf}.csv" if compress else f"{symbol}_{tf}.csv.gz")
+            other.unlink(missing_ok=True)
+            if compress:
+                with open(path, "rb") as fi, gzip.open(target, "wb") as fo:
+                    shutil.copyfileobj(fi, fo)
+            else:
+                shutil.copyfile(path, target)
         rows.append({"symbol": symbol, "tf": tf, "source": path.name, **check(df, tf)})
     return pd.DataFrame(rows)
 
@@ -129,9 +139,11 @@ def main() -> None:
     ap.add_argument("src", type=Path, help="folder holding the exported CSVs")
     ap.add_argument("--dest", type=Path, default=None, help="target data dir (default: data/)")
     ap.add_argument("--dry-run", action="store_true", help="report only, write nothing")
+    ap.add_argument("--gzip", action="store_true",
+                    help="store as .csv.gz (~4x smaller; loaders read it transparently)")
     args = ap.parse_args()
 
-    report = ingest(args.src, args.dest, args.dry_run)
+    report = ingest(args.src, args.dest, args.dry_run, args.gzip)
     if report.empty:
         print("nothing ingested")
         return

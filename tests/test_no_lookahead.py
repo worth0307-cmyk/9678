@@ -570,3 +570,56 @@ def test_grid_ladder_is_filled_adversely_within_the_bar():
                        "low": [100.0, 96.0], "close": [100.0, 101.0]}, index=idx)
     r = G.run_grid(df, G.GridParams(step=0.01, take_profit=0.01, max_levels=5, fee=0.0))
     assert r.max_levels_used >= 4, "the low should have filled several rungs first"
+
+
+def test_rsi_strategy_cannot_see_the_bar_it_trades():
+    """Perturbing a bar's close must not change any fill at or before that bar.
+
+    Signals are read from bar t's close and filled at bar t+1's open, so
+    rewriting bar t's close may move later trades but must leave everything up
+    to and including t untouched.  A stateful pyramiding loop is exactly where an
+    off-by-one slips in unnoticed.
+    """
+    from vibt import rsi_strat as R
+
+    df = D.load("4h", symbol="BTCUSDT").iloc[:3000].copy()
+    base = R.run(df)
+    assert len(base.trades) > 0, "need trades for this test to mean anything"
+
+    cut = df.index[2000]
+    bumped = df.copy()
+    bumped.loc[cut, "close"] *= 1.15
+
+    after = R.run(bumped)
+    a = base.trades[base.trades.entry_time <= cut]
+    b = after.trades[after.trades.entry_time <= cut]
+    assert len(a) == len(b), "a later close changed an earlier trade count"
+    pd.testing.assert_series_equal(a["pnl"].reset_index(drop=True),
+                                   b["pnl"].reset_index(drop=True),
+                                   check_exact=False, rtol=1e-9)
+
+
+def test_rsi_pyramid_never_exceeds_full_equity():
+    """50% + 5x10% must stay at or under 100% of the equity it was sized from."""
+    from vibt import rsi_strat as R
+
+    df = D.load("4h", symbol="BTCUSDT")
+    res = R.run(df)
+    p = res.params
+    cap = p.first_frac + p.max_adds * p.add_frac
+    assert abs(cap - 1.0) < 1e-12, "spec says the ladder tops out at 100%"
+    assert res.trades["legs"].max() <= 1 + p.max_adds, "more adds than allowed"
+
+
+def test_rsi_matches_the_pine_definition():
+    """RSI must reproduce ta.rma seeding, not pandas' first-value seeding."""
+    from vibt import rsi_strat as R
+
+    s = D.load("4h", symbol="BTCUSDT")["close"].iloc[:400]
+    got = R.rsi_pine(s, 14)
+    chg = s.diff()
+    up = R.rma(chg.clip(lower=0), 14)
+    dn = R.rma(-chg.clip(upper=0), 14)
+    assert abs(up.iloc[13] - chg.clip(lower=0).iloc[:14].mean()) < 1e-12
+    assert got.dropna().between(0, 100).all()
+    assert got.iloc[:13].isna().all(), "RSI must not exist before its warmup"

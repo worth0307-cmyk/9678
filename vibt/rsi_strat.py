@@ -125,8 +125,14 @@ def _streak_dn(ma: np.ndarray, t: int, k: int) -> bool:
 
 
 def run(df: pd.DataFrame, p: RsiParams | None = None,
-        equity0: float = 1000.0) -> RsiResult:
-    """Signals read bar t's close; every fill happens at bar t+1's open."""
+        equity0: float = 1000.0, regime: pd.Series | None = None) -> RsiResult:
+    """Signals read bar t's close; every fill happens at bar t+1's open.
+
+    `regime` optionally restricts which side may be opened: +1 permits longs
+    only, -1 shorts only, 0 blocks new entries.  It gates ENTRIES only -- a
+    position already open is still managed by its own exit rule, so a regime
+    flip cannot retroactively close a trade the rule had not yet exited.
+    """
     p = p or RsiParams()
     rsi = rsi_pine(df["close"], p.rsi_len)
     ma = rsi.rolling(p.ma_len).mean()
@@ -138,6 +144,11 @@ def run(df: pd.DataFrame, p: RsiParams | None = None,
         lo_band = pd.Series(p.lower, index=rsi.index)
         hi_band = pd.Series(p.upper, index=rsi.index)
     lo_arr, hi_arr = lo_band.to_numpy(), hi_band.to_numpy()
+
+    # None must mean "no gate at all".  A default of ones would read as +1 and
+    # silently block every short, which is the same as quietly changing the
+    # strategy rather than leaving it alone.
+    reg_arr = regime.reindex(df.index).to_numpy() if regime is not None else None
 
     r = rsi.to_numpy()
     m = ma.to_numpy()
@@ -186,6 +197,13 @@ def run(df: pd.DataFrame, p: RsiParams | None = None,
                            and np.all(seg < lo_b))
                 short_ok = (ok_seg and np.isfinite(hi_b) and _streak_dn(m, prev, p.trend_bars)
                             and np.all(seg > hi_b))
+                if reg_arr is not None:
+                    gate = reg_arr[prev]
+                    if np.isfinite(gate):
+                        long_ok = long_ok and gate > 0
+                        short_ok = short_ok and gate < 0
+                    else:
+                        long_ok = short_ok = False
                 if long_ok or short_ok:
                     side = 1 if long_ok else -1
                     base = equity

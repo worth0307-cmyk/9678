@@ -74,6 +74,22 @@ class RsiParams:
     add_frac: float = 0.10
     fee: float = 0.00065         # 4.5bp fee + 2bp slippage, per side
 
+    # 0 disables.  Otherwise the position closes once its mark-to-market loss
+    # reaches this fraction of the equity it was sized from.  Modelled as a
+    # resting stop order: it triggers intrabar off the adverse extreme and fills
+    # at the stop price, which is the standard convention and is optimistic in a
+    # gap -- the slippage allowance in `fee` is the only cushion.
+    stop_loss: float = 0.0
+
+    # "fixed"    uses lower/upper as written
+    # "quantile" replaces them with rolling percentiles of RSI's own recent
+    #            distribution, so the bands follow the regime instead of assuming
+    #            30/70 is symmetric in a market that trends
+    band_mode: str = "fixed"
+    band_window: int = 500       # 4h bars (~83 days) of prior RSI
+    q_lo: float = 0.10
+    q_hi: float = 0.90
+
 
 @dataclass
 class RsiResult:
@@ -105,6 +121,14 @@ def run(df: pd.DataFrame, p: RsiParams | None = None,
     p = p or RsiParams()
     rsi = rsi_pine(df["close"], p.rsi_len)
     ma = rsi.rolling(p.ma_len).mean()
+    if p.band_mode == "quantile":
+        prior = rsi.shift(1)     # a band may never see the bar it judges
+        lo_band = prior.rolling(p.band_window, min_periods=p.band_window // 2).quantile(p.q_lo)
+        hi_band = prior.rolling(p.band_window, min_periods=p.band_window // 2).quantile(p.q_hi)
+    else:
+        lo_band = pd.Series(p.lower, index=rsi.index)
+        hi_band = pd.Series(p.upper, index=rsi.index)
+    lo_arr, hi_arr = lo_band.to_numpy(), hi_band.to_numpy()
 
     r = rsi.to_numpy()
     m = ma.to_numpy()
@@ -129,17 +153,30 @@ def run(df: pd.DataFrame, p: RsiParams | None = None,
     def position_value(px: float) -> float:
         return sum(q * side * (px / e - 1) for e, q in legs)
 
+    def stop_price() -> float:
+        """Price at which the whole ladder's loss equals stop_loss x base.
+
+        Solving once for the combined book, rather than per leg, is what makes
+        the stop mean "lose this much of the account" no matter how many rungs
+        have filled -- which is the only definition that caps risk when the
+        position size itself grows with the loss.
+        """
+        a = sum(q / e for e, q in legs)
+        b = sum(q for _, q in legs)
+        return (b - side * p.stop_loss * base) / a
+
     for t in range(n):
         # ---------- act on the signal formed at t-1, filling at this bar's open
         if t > 0 and np.isfinite(op[t]):
             prev = t - 1
             if side == 0:
-                long_ok = (_streak_up(m, prev, p.trend_bars)
-                           and np.all(np.isfinite(r[prev - p.rsi_bars + 1:prev + 1]))
-                           and np.all(r[prev - p.rsi_bars + 1:prev + 1] < p.lower))
-                short_ok = (_streak_dn(m, prev, p.trend_bars)
-                            and np.all(np.isfinite(r[prev - p.rsi_bars + 1:prev + 1]))
-                            and np.all(r[prev - p.rsi_bars + 1:prev + 1] > p.upper))
+                seg = r[prev - p.rsi_bars + 1:prev + 1]
+                lo_b, hi_b = lo_arr[prev], hi_arr[prev]
+                ok_seg = len(seg) == p.rsi_bars and np.all(np.isfinite(seg))
+                long_ok = (ok_seg and np.isfinite(lo_b) and _streak_up(m, prev, p.trend_bars)
+                           and np.all(seg < lo_b))
+                short_ok = (ok_seg and np.isfinite(hi_b) and _streak_dn(m, prev, p.trend_bars)
+                            and np.all(seg > hi_b))
                 if long_ok or short_ok:
                     side = 1 if long_ok else -1
                     base = equity
@@ -152,8 +189,8 @@ def run(df: pd.DataFrame, p: RsiParams | None = None,
                     worst = 0.0
             else:
                 # exit first: an exit signal on the same bar as an add wins
-                exit_now = (side > 0 and r[prev] >= p.upper) or \
-                           (side < 0 and r[prev] <= p.lower)
+                exit_now = (side > 0 and r[prev] >= hi_arr[prev]) or \
+                           (side < 0 and r[prev] <= lo_arr[prev])
                 if exit_now:
                     pnl = position_value(op[t])
                     gross = sum(q for _, q in legs)
@@ -181,6 +218,33 @@ def run(df: pd.DataFrame, p: RsiParams | None = None,
                         legs.append((op[t], notional))
                         equity -= notional * p.fee
                         adds += 1
+
+        # ---------- stop first, before marking: a resting order fills intrabar
+        if side != 0 and legs and p.stop_loss > 0:
+            sp = stop_price()
+            adverse = lo[t] if side > 0 else hi[t]
+            hit = (side > 0 and np.isfinite(adverse) and adverse <= sp) or \
+                  (side < 0 and np.isfinite(adverse) and adverse >= sp)
+            if hit:
+                fill = sp
+                # a bar that opens through the stop fills at the open, not better
+                if (side > 0 and op[t] < sp) or (side < 0 and op[t] > sp):
+                    fill = op[t]
+                pnl = position_value(fill)
+                gross = sum(q for _, q in legs)
+                equity += pnl - gross * p.fee
+                worst = min(worst, pnl / base)
+                trades.append({
+                    "direction": "long" if side > 0 else "short",
+                    "entry_time": idx[entry_i], "exit_time": idx[t],
+                    "bars_held": t - entry_i,
+                    "entry_rsi": entry_rsi, "exit_rsi": r[t - 1] if t else np.nan,
+                    "legs": len(legs), "notional": gross,
+                    "pnl": pnl - gross * p.fee,
+                    "return_on_equity": (pnl - gross * p.fee) / base,
+                    "worst_excursion": worst, "stopped": True,
+                })
+                side, legs, adds = 0, [], 0
 
         # ---------- mark the book, tracking the worst point while holding
         if side != 0 and legs:

@@ -101,7 +101,14 @@ class RsiResult:
 
 
 def _streak_up(ma: np.ndarray, t: int, k: int) -> bool:
-    """MA rose on each of the last k bars, which needs k+1 finite values."""
+    """MA rose on each of the last k bars, which needs k+1 finite values.
+
+    k=0 switches the condition off entirely rather than merely requiring the MA
+    to exist -- otherwise "no MA filter" would still silently wait out the MA's
+    warmup and drop the first weeks of signals.
+    """
+    if k <= 0:
+        return True
     if t - k < 0:
         return False
     seg = ma[t - k:t + 1]
@@ -109,6 +116,8 @@ def _streak_up(ma: np.ndarray, t: int, k: int) -> bool:
 
 
 def _streak_dn(ma: np.ndarray, t: int, k: int) -> bool:
+    if k <= 0:
+        return True
     if t - k < 0:
         return False
     seg = ma[t - k:t + 1]

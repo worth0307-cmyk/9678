@@ -155,3 +155,86 @@ def run_grid(df: pd.DataFrame, p: GridParams, equity0: float = 1.0) -> GridResul
         closed=closed, wins=wins, liquidated_at=dead_at,
         max_levels_used=max_used, params=p,
     )
+
+
+@dataclass
+class AnchoredParams:
+    """A fixed-anchor, equal-size grid -- the classic stock grid, not a martingale.
+
+    Layers sit at anchor*(1-step)^i (or anchor - i*step in absolute mode), each
+    holding the SAME quantity.  A layer sells once price reaches its own buy
+    price plus `up`.  The anchor never moves, which is the property that decides
+    everything: coverage is fixed at layers*step, and outside that band the
+    strategy has no behaviour left -- above it holds nothing, below it holds
+    everything and waits.
+    """
+    anchor: float = 0.0          # 0 = use the first bar's open
+    step: float = 0.01           # spacing between buy layers
+    up: float = 0.01             # each layer's sell target above its own buy
+    layers: int = 5
+    per_layer: float = 0.2       # notional per layer as a fraction of capital
+    fee: float = 0.0005
+    ratio_mode: bool = True      # geometric spacing rather than absolute
+
+
+@dataclass
+class AnchoredResult:
+    realised: pd.Series
+    mark: pd.Series
+    held: pd.Series               # layers currently held
+    round_trips: int = 0
+    bars_full: int = 0            # bars with every layer held (no grid income)
+    bars_empty: int = 0           # bars above the top layer (nothing to do)
+    params: AnchoredParams = field(default_factory=AnchoredParams)
+
+
+def run_anchored(df: pd.DataFrame, p: AnchoredParams,
+                 equity0: float = 1.0) -> AnchoredResult:
+    o = df["open"].to_numpy(float)
+    hi = df["high"].to_numpy(float)
+    lo = df["low"].to_numpy(float)
+    cl = df["close"].to_numpy(float)
+    n = len(df)
+
+    anchor = p.anchor if p.anchor > 0 else o[0]
+    buy_px = np.array([anchor * (1 - p.step) ** (i + 1) if p.ratio_mode
+                       else anchor - (i + 1) * p.step for i in range(p.layers)])
+    sell_px = buy_px * (1 + p.up) if p.ratio_mode else buy_px + p.up
+
+    held = np.zeros(p.layers, dtype=bool)
+    size = p.per_layer * equity0
+    cash = equity0
+    real = np.empty(n)
+    mark = np.empty(n)
+    nheld = np.empty(n)
+    trips = full = empty = 0
+
+    for t in range(n):
+        if not np.isfinite(cl[t]):
+            real[t] = cash
+            mark[t] = cash
+            nheld[t] = held.sum()
+            continue
+        # adverse first: fills on the way down before any take-profit
+        for i in range(p.layers):
+            if not held[i] and lo[t] <= buy_px[i]:
+                held[i] = True
+                cash -= size * p.fee
+        for i in range(p.layers):
+            if held[i] and hi[t] >= sell_px[i]:
+                held[i] = False
+                cash += size * (sell_px[i] / buy_px[i] - 1) - size * p.fee
+                trips += 1
+
+        floating = sum(size * (cl[t] / buy_px[i] - 1) for i in range(p.layers) if held[i])
+        real[t] = cash
+        mark[t] = cash + floating
+        nheld[t] = held.sum()
+        full += int(held.all())
+        empty += int(not held.any())
+
+    idx = df.index
+    return AnchoredResult(
+        realised=pd.Series(real, index=idx), mark=pd.Series(mark, index=idx),
+        held=pd.Series(nheld, index=idx), round_trips=trips,
+        bars_full=full, bars_empty=empty, params=p)

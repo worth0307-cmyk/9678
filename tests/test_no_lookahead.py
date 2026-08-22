@@ -623,3 +623,130 @@ def test_rsi_matches_the_pine_definition():
     assert abs(up.iloc[13] - chg.clip(lower=0).iloc[:14].mean()) < 1e-12
     assert got.dropna().between(0, 100).all()
     assert got.iloc[:13].isna().all(), "RSI must not exist before its warmup"
+
+
+# --------------------------------------------------------------- six-MA system
+def test_ma_cluster_threshold_cannot_see_the_current_bar():
+    """The 'is this a cluster' threshold must be built from prior bars only.
+
+    A tight-MA threshold that includes today's spread in its own quantile is the
+    subtlest lookahead available here: it never moves a fill by one bar, it just
+    quietly makes clusters identifiable at the moment they matter.
+    """
+    from vibt import masys as MS
+
+    df = D.load("1d", symbol="BTCUSDT").copy()
+    p = MS.MaParams()
+    mas = MS.six_mas(df["close"], p.lens)
+    sp = MS.spread(mas, df["close"])
+    base = MS.tight_mask(sp, p)
+
+    bumped = sp.copy()
+    cut = 800
+    bumped.iloc[cut] *= 5.0
+    after = MS.tight_mask(bumped, p)
+    assert not base.iloc[:cut].ne(after.iloc[:cut]).any(), \
+        "a later spread value changed an earlier cluster verdict"
+
+
+def test_ma_signals_cannot_see_the_bar_they_fill_on():
+    """Rewriting bar t's close must not alter any signal placed at or before t."""
+    from vibt import masys as MS
+
+    df = D.load("4h", symbol="BTCUSDT").iloc[:4000].copy()
+    p = MS.MaParams()
+    for fn in (MS.entries_cluster_break, MS.entries_ma20_pullback):
+        base = fn(df, p)
+        assert base, "need signals for this test to mean anything"
+        cut = 3000
+        bumped = df.copy()
+        bumped.iloc[cut, bumped.columns.get_loc("close")] *= 1.2
+        after = fn(bumped, p)
+        a = [(s.i, s.side, round(s.stop, 8)) for s in base if s.i <= cut]
+        b = [(s.i, s.side, round(s.stop, 8)) for s in after if s.i <= cut]
+        assert a == b, f"{fn.__name__} moved a signal at or before the changed bar"
+
+
+def test_ma_bracket_fills_the_stop_when_a_bar_holds_both():
+    """One bar spanning stop and target must resolve as the loss, never the win."""
+    from vibt import masys as MS
+
+    idx = pd.date_range("2024-01-01", periods=3, freq="D", tz="UTC")
+    df = pd.DataFrame({"open": [100.0, 100.0, 100.0],
+                       "high": [100.0, 140.0, 100.0],
+                       "low": [100.0, 80.0, 100.0],
+                       "close": [100.0, 100.0, 100.0]}, index=idx)
+    p = MS.MaParams(target_r=3.0, fee=0.0)
+    sig = [MS.Signal(i=1, side=1, stop=90.0)]      # target 130, stop 90, both hit
+    t = MS.evaluate(df, sig, p)
+    assert t.loc[0, "why"] == "stop"
+    assert t.loc[0, "r_multiple"] == pytest.approx(-1.0)
+
+
+def test_ma_gap_through_the_stop_fills_at_the_open():
+    """A bar opening past the stop cannot fill at the stop price."""
+    from vibt import masys as MS
+
+    idx = pd.date_range("2024-01-01", periods=3, freq="D", tz="UTC")
+    df = pd.DataFrame({"open": [100.0, 100.0, 70.0],
+                       "high": [100.0, 101.0, 72.0],
+                       "low": [100.0, 99.0, 65.0],
+                       "close": [100.0, 100.0, 70.0]}, index=idx)
+    p = MS.MaParams(target_r=3.0, fee=0.0)
+    t = MS.evaluate(df, [MS.Signal(i=1, side=1, stop=90.0)], p)
+    assert t.loc[0, "exit"] == pytest.approx(70.0), "filled better than the gap allowed"
+    assert t.loc[0, "r_multiple"] == pytest.approx(-3.0)
+
+
+def test_ma_cluster_break_fires_once_per_cluster():
+    """A: staying outside the band is a state; leaving it is the event traded."""
+    from vibt import masys as MS
+
+    df = D.load("1d", symbol="BTCUSDT")
+    p = MS.MaParams()
+    mas = MS.six_mas(df["close"], p.lens)
+    tight = MS.tight_mask(MS.spread(mas, df["close"]), p)
+    clusters = int(((tight & ~tight.shift(1).fillna(False)).sum()))
+    assert len(MS.entries_cluster_break(df, p)) <= clusters, \
+        "more entries than clusters means the rule is firing on a state"
+
+
+def test_ma_null_matches_the_stop_width_it_resamples():
+    """The random control must reproduce the stop widths, not invent its own."""
+    from vibt import masys as MS
+
+    df = D.load("1d", symbol="BTCUSDT")
+    p = MS.MaParams()
+    real = MS.evaluate(df, MS.entries_ma20_pullback(df, p), p)
+    assert len(real) >= 3
+    rng = np.random.default_rng(0)
+    sig = MS.random_entries(df, p, 200, 200, rng, real.risk_atr.to_numpy())
+    z = MS.evaluate(df, sig, p)
+    assert len(z) > 50
+    lo, hi = real.risk_atr.min(), real.risk_atr.max()
+    assert z.risk_atr.between(lo * 0.99, hi * 1.01).all(), \
+        "the null drew stop widths outside the distribution it was given"
+    assert (z.side == "long").sum() > 0 and (z.side == "short").sum() > 0
+
+
+def test_ma_null_respects_the_requested_side_counts():
+    """Longs and shorts are drawn to their own counts, not flipped at a ratio."""
+    from vibt import masys as MS
+
+    df = D.load("1d", symbol="BTCUSDT")
+    p = MS.MaParams(min_risk=0.0, max_risk=1.0)
+    rng = np.random.default_rng(3)
+    sig = MS.random_entries(df, p, 40, 10, rng, np.array([1.0, 1.5, 2.0]))
+    assert sum(s.side > 0 for s in sig) == 40
+    assert sum(s.side < 0 for s in sig) == 10
+
+
+def test_ma_warmup_holds_every_average_back():
+    """EMA is defined from bar 0; a cluster must not be callable before warmup."""
+    from vibt import masys as MS
+
+    df = D.load("1d", symbol="BTCUSDT")
+    mas = MS.six_mas(df["close"], MS.MA_LENS)
+    warm = max(MS.MA_LENS)
+    assert mas.iloc[:warm].isna().all().all(), "an average was live before its window"
+    assert mas.iloc[warm:].notna().all().all()

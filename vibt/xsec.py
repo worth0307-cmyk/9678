@@ -144,6 +144,13 @@ def run(
     st = M.compute(net, ann_factor, position=exposure)
     st.extra["gross_exposure"] = float(exposure.mean())
     st.extra["net_exposure"] = float(held.sum(axis=1).iloc[:-1].mean())
+    # metrics.compute derives turnover from the position series, which for a
+    # panel is GROSS EXPOSURE -- pinned at 1.0 for a dollar-neutral book, so it
+    # reports ~0 however violently the names underneath are being rotated.  The
+    # cost series was always right; only this number was wrong.  Overwrite it
+    # with the name-level turnover the costs were actually charged on.
+    years = len(net) / ann_factor if len(net) else np.nan
+    st.turnover_ann = float(turn.iloc[:-1].sum() / years) if years else np.nan
     return B.Result(net, gross_ret.iloc[:-1], exposure, equity, cost.iloc[:-1],
                     pd.DataFrame(), st, name, weights=held.iloc[:-1])
 

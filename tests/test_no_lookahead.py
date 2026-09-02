@@ -750,3 +750,35 @@ def test_ma_warmup_holds_every_average_back():
     warm = max(MS.MA_LENS)
     assert mas.iloc[:warm].isna().all().all(), "an average was live before its window"
     assert mas.iloc[warm:].notna().all().all()
+
+
+def test_panel_turnover_is_name_level_not_gross_exposure():
+    """A dollar-neutral book rotating every name must not report ~0 turnover.
+
+    metrics.compute derives turnover from the position series, and for a panel
+    that series is GROSS EXPOSURE -- pinned at 1.0 for a dollar-neutral book.
+    Left alone it reports near-zero turnover however violently the names
+    underneath are rotated, which hides exactly the fact that decides whether a
+    high-frequency cross-sectional signal can pay for itself.
+    """
+    from vibt import xsec as X
+
+    syms = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+    P = pd.DataFrame({s: D.load("1d", symbol=s)["open"] for s in syms}).sort_index()
+    w = pd.DataFrame(0.0, index=P.index, columns=P.columns)
+    # every day: flip the whole book between two pairs, so 2.0 notional turns over
+    w.iloc[::2, 0], w.iloc[::2, 1] = 0.5, -0.5
+    w.iloc[1::2, 2], w.iloc[1::2, 3] = 0.5, -0.5
+
+    r = X.run(P, w, B.Costs(4.5, 2.0), 365.0, "")
+    # the first bar is flat by construction (weights are shifted before use), so
+    # the constant-exposure claim is about every bar after the warmup
+    gross = r.weights.abs().sum(axis=1).iloc[1:]
+    assert gross.std() < 1e-9 and gross.iloc[0] == pytest.approx(1.0), \
+        "gross exposure should be pinned at 1.0 -- that is what hides the rotation"
+    assert r.stats.turnover_ann == pytest.approx(730, rel=0.02), \
+        "turnover must count name-level rotation, not the constant gross exposure"
+    # and the cost series must agree with that turnover
+    years = len(r.rets) / 365.0
+    implied = r.costs.sum() / years / B.Costs(4.5, 2.0).per_side
+    assert implied == pytest.approx(r.stats.turnover_ann, rel=0.02)

@@ -782,3 +782,61 @@ def test_panel_turnover_is_name_level_not_gross_exposure():
     years = len(r.rets) / 365.0
     implied = r.costs.sum() / years / B.Costs(4.5, 2.0).per_side
     assert implied == pytest.approx(r.stats.turnover_ann, rel=0.02)
+
+
+def test_rolling_pca_residual_cannot_see_later_bars():
+    """Perturbing a later return must not move an earlier bar's residual.
+
+    Fitting components on the whole sample and then trading the residual is the
+    classic way to backtest nothing: the loadings already know which names were
+    about to diverge.  This pins the window to trailing bars only.
+    """
+    from vibt import factors as F
+
+    syms = [s for s in D.available_symbols(require=("1d",))
+            if s not in ("USDCUSDT", "BTCDOMUSDT")][:60]
+    C = pd.DataFrame({s: D.load("1d", symbol=s)["close"] for s in syms}).sort_index()
+    R = np.log(C).diff().replace([np.inf, -np.inf], np.nan).iloc[:400]
+
+    base = F.rolling_pca(R, lookback=120, ks=(1,), min_names=25)
+    cut = 300
+    bumped = R.copy()
+    bumped.iloc[cut] = bumped.iloc[cut] * 3.0
+    after = F.rolling_pca(bumped, lookback=120, ks=(1,), min_names=25)
+
+    a = base.resid[1].iloc[:cut].dropna(how="all")
+    b = after.resid[1].iloc[:cut].dropna(how="all")
+    assert len(a) > 50, "need residuals before the perturbed bar for this to bite"
+    pd.testing.assert_frame_equal(a, b, check_exact=False, rtol=1e-9)
+    # and the perturbed bar itself SHOULD change, or the test proves nothing
+    assert not np.allclose(base.resid[1].iloc[cut].dropna(),
+                           after.resid[1].iloc[cut].dropna(), rtol=1e-6)
+
+
+def test_pc1_loading_sign_is_pinned():
+    """PC1 is the market here, so its loadings must not flip sign date to date."""
+    from vibt import factors as F
+
+    syms = [s for s in D.available_symbols(require=("1d",))
+            if s not in ("USDCUSDT", "BTCDOMUSDT")][:60]
+    C = pd.DataFrame({s: D.load("1d", symbol=s)["close"] for s in syms}).sort_index()
+    R = np.log(C).diff().replace([np.inf, -np.inf], np.nan).iloc[:500]
+    out = F.rolling_pca(R, lookback=120, ks=(1,), min_names=25)
+    rows = out.load1.dropna(how="all")
+    assert len(rows) > 100
+    # an unpinned eigenvector would leave roughly half the rows mostly negative
+    frac_pos = (rows > 0).sum(axis=1) / rows.notna().sum(axis=1)
+    assert (frac_pos > 0.8).mean() > 0.95, \
+        "PC1 loadings should be overwhelmingly positive on every date"
+
+
+def test_dollar_neutral_book_can_still_carry_factor_exposure():
+    """The reason net-weight checks are not factor-neutrality checks."""
+    from vibt import factors as F
+
+    idx = pd.date_range("2024-01-01", periods=3, freq="D", tz="UTC")
+    w = pd.DataFrame({"A": [0.5], "B": [-0.5]}, index=idx[:1])
+    load = pd.DataFrame({"A": [0.9], "B": [0.1]}, index=idx[:1])
+    expo = F.portfolio_factor_exposure(w, load)
+    assert float(w.sum(axis=1).iloc[0]) == pytest.approx(0.0), "book is dollar-neutral"
+    assert float(expo.iloc[0]) == pytest.approx(0.4), "but it is long the factor"

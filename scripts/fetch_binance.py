@@ -10,6 +10,16 @@ checkout, no pandas.
     python3 fetch_binance.py --skip-funding     # klines only
     python3 fetch_binance.py --dry-run          # list what it would fetch
 
+    # a hand-picked universe, all three timeframes, from a chosen start date:
+    python3 fetch_binance.py --symbols BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,TAOUSDT,HYPEUSDT \
+        --intervals 1h,4h,1d --start 2022-01-01 --out ./pull6
+
+--symbols bypasses the selection logic below entirely.  That logic exists to
+pick an out-of-sample set without looking at prices; once the universe is chosen
+by hand there is nothing for it to protect, and a symbol listed after --start
+simply begins where it begins (the run says so per symbol rather than handing
+back a short file that looks like a failure).
+
 It gathers three things in one pass:
 
   1. Daily klines WITH VOLUME for every eligible symbol never used in
@@ -246,6 +256,11 @@ def main() -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default="./binance_pull", type=Path)
     ap.add_argument("--start", default="2023-01-01")
+    ap.add_argument("--symbols", default="",
+                    help="comma-separated symbols to fetch, bypassing the onboard-date "
+                         "selection entirely.  Use this when the universe is chosen by "
+                         "hand; the automatic path exists to pick an out-of-sample set "
+                         "without looking at prices, which is a different job.")
     ap.add_argument("--onboard-before", default="2024-07-01",
                     help="out-of-sample names must have listed by this date")
     ap.add_argument("--new-max", type=int, default=0,
@@ -265,6 +280,31 @@ def main() -> None:
 
     print("reading exchangeInfo ...", flush=True)
     elig, listed = universe(args.onboard_before)
+
+    if args.symbols:
+        want = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+        missing = [s for s in want if s not in listed]
+        onboard = {u["symbol"]: u["onboard"] for u in elig}
+        print(f"\n  explicit symbol list: {len(want)}  {' '.join(want)}")
+        if missing:
+            print(f"  WARNING: not currently listed as USDT-M perpetuals: {missing}")
+        # A symbol listed after --start has no data before it exists.  Saying so
+        # here beats handing back a short file that looks like a fetch failure.
+        late = {s: onboard[s] for s in want
+                if s in onboard and onboard[s] > start}
+        for s, ob in sorted(late.items(), key=lambda kv: kv[1]):
+            d = time.strftime("%Y-%m-%d", time.gmtime(ob / 1000))
+            print(f"  NOTE: {s} onboarded {d}, after --start {args.start} "
+                  f"-- its history begins there and cannot go earlier")
+        targets = [s for s in want if s in listed]
+        print(f"\n  klines to fetch : {len(targets)} symbols x {len(intervals)} intervals")
+        print(f"  funding to fetch: {0 if args.skip_funding else len(targets)} symbols")
+        if args.dry_run:
+            print("\ndry run, nothing written")
+            return
+        run_pull(args, targets, intervals, start)
+        return
+
     have = set(EXISTING)
     fresh = [u for u in elig if u["symbol"] not in have]
     if args.new_max:
@@ -295,12 +335,24 @@ def main() -> None:
         print("\ndry run, nothing written")
         return
 
+    run_pull(args, targets, intervals, start, new_syms)
+
+
+
+def run_pull(args, targets, intervals, start, new_syms=()) -> None:
+    """Fetch klines and funding for `targets` and write the manifest.
+
+    Split out of main() so an explicit --symbols list and the automatic
+    out-of-sample selection share one download path; only the choice of
+    which symbols to pull differs between them.
+    """
+    new_set = set(new_syms)
     args.out.mkdir(parents=True, exist_ok=True)
     manifest = []
     t0 = time.time()
 
     for i, sym in enumerate(targets, 1):
-        tag = "new" if sym in set(new_syms) else "existing"
+        tag = "new" if sym in new_set else "existing"
         print(f"\n[{i}/{len(targets)}] {sym}  ({tag})", flush=True)
         row = {"symbol": sym, "group": tag,
                "named_a_priori": sym in NAMED_NEVER_PULLED}
@@ -370,6 +422,7 @@ then from your local machine (PowerShell):
 
   scp vpn-sg:~/binance_pull_{stamp}.* "$env:USERPROFILE\\Desktop\\"
 """)
+
 
 
 if __name__ == "__main__":

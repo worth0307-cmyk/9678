@@ -784,6 +784,25 @@ def test_panel_turnover_is_name_level_not_gross_exposure():
     assert implied == pytest.approx(r.stats.turnover_ann, rel=0.02)
 
 
+def _synthetic_panel(n_names: int = 40, n_bars: int = 500, seed: int = 7):
+    """A market factor plus idiosyncratic noise, built here rather than loaded.
+
+    A causality test must not depend on how many symbols happen to be sitting in
+    data/.  Narrowing the research universe to six coins broke the earlier
+    versions of these two tests, which is a defect in the tests: nothing about
+    "the window must exclude the bar it decomposes" is a fact about the coin
+    list.  So the panel is generated, wide enough for a real cross-section, with
+    the one-factor structure crypto actually has.
+    """
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2023-01-01", periods=n_bars, freq="D", tz="UTC")
+    mkt = rng.normal(0, 0.03, n_bars)
+    beta = rng.uniform(0.6, 1.6, n_names)
+    idio = rng.normal(0, 0.02, (n_bars, n_names))
+    cols = [f"C{i:02d}USDT" for i in range(n_names)]
+    return pd.DataFrame(mkt[:, None] * beta[None, :] + idio, index=idx, columns=cols)
+
+
 def test_rolling_pca_residual_cannot_see_later_bars():
     """Perturbing a later return must not move an earlier bar's residual.
 
@@ -793,11 +812,7 @@ def test_rolling_pca_residual_cannot_see_later_bars():
     """
     from vibt import factors as F
 
-    syms = [s for s in D.available_symbols(require=("1d",))
-            if s not in ("USDCUSDT", "BTCDOMUSDT")][:60]
-    C = pd.DataFrame({s: D.load("1d", symbol=s)["close"] for s in syms}).sort_index()
-    R = np.log(C).diff().replace([np.inf, -np.inf], np.nan).iloc[:400]
-
+    R = _synthetic_panel()
     base = F.rolling_pca(R, lookback=120, ks=(1,), min_names=25)
     cut = 300
     bumped = R.copy()
@@ -817,17 +832,15 @@ def test_pc1_loading_sign_is_pinned():
     """PC1 is the market here, so its loadings must not flip sign date to date."""
     from vibt import factors as F
 
-    syms = [s for s in D.available_symbols(require=("1d",))
-            if s not in ("USDCUSDT", "BTCDOMUSDT")][:60]
-    C = pd.DataFrame({s: D.load("1d", symbol=s)["close"] for s in syms}).sort_index()
-    R = np.log(C).diff().replace([np.inf, -np.inf], np.nan).iloc[:500]
-    out = F.rolling_pca(R, lookback=120, ks=(1,), min_names=25)
+    out = F.rolling_pca(_synthetic_panel(), lookback=120, ks=(1,), min_names=25)
     rows = out.load1.dropna(how="all")
     assert len(rows) > 100
     # an unpinned eigenvector would leave roughly half the rows mostly negative
     frac_pos = (rows > 0).sum(axis=1) / rows.notna().sum(axis=1)
     assert (frac_pos > 0.8).mean() > 0.95, \
         "PC1 loadings should be overwhelmingly positive on every date"
+    # the synthetic panel is one-factor by construction, so PC1 must dominate
+    assert out.var1.dropna().median() > 0.5
 
 
 def test_dollar_neutral_book_can_still_carry_factor_exposure():

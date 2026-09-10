@@ -165,16 +165,22 @@ def beijing(ts_ms: int) -> str:
     return datetime.fromtimestamp(ts_ms / 1000, BEIJING).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def universe(onboard_before: str) -> tuple[list[dict], set[str]]:
-    """(eligible symbols, every USDT-M perpetual currently listed).
+def universe(onboard_before: str) -> tuple[list[dict], dict[str, int]]:
+    """(eligible symbols, {every listed USDT-M perpetual: its onboard time}).
 
     Both are needed.  Checking the repository's symbols against the *eligible*
     slice reports every recently-listed name as missing, which reads as
     "delisted" when it only means "listed after the cutoff".
+
+    The second value carries onboard dates for EVERY listed symbol, not just the
+    eligible ones.  Reading them off the date-filtered slice instead is the same
+    mistake in a second disguise: a symbol listed after the cutoff is absent from
+    that slice, so any per-symbol note about its true start silently skips
+    exactly the symbols that need one.
     """
     info = get("/fapi/v1/exchangeInfo", {})
     cutoff = ms(onboard_before)
-    listed = {s["symbol"] for s in info["symbols"]
+    listed = {s["symbol"]: int(s.get("onboardDate", 0)) for s in info["symbols"]
               if s.get("status") == "TRADING" and s.get("contractType") == "PERPETUAL"}
     out = []
     for s in info["symbols"]:
@@ -284,7 +290,7 @@ def main() -> None:
     if args.symbols:
         want = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
         missing = [s for s in want if s not in listed]
-        onboard = {u["symbol"]: u["onboard"] for u in elig}
+        onboard = listed          # every listed symbol, not the eligible slice
         print(f"\n  explicit symbol list: {len(want)}  {' '.join(want)}")
         if missing:
             print(f"  WARNING: not currently listed as USDT-M perpetuals: {missing}")

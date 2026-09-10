@@ -240,6 +240,88 @@ def cross_check(dest: Path | None = None, show: int = 4) -> None:
         print(f"    {pair}  {ts}  {count} symbol(s){note}")
 
 
+FUND_NAME = re.compile(r"^(?P<symbol>[A-Z0-9]+)[_-]funding$", re.IGNORECASE)
+
+
+def _load_funding(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path, encoding="utf-8-sig")
+    ts = df.columns[0]
+    df["ts"] = pd.to_datetime(df[ts]) - pd.Timedelta(hours=8)   # Beijing -> UTC
+    df = df.drop(columns=[ts]).set_index("ts").sort_index()
+    return df[~df.index.duplicated(keep="last")]
+
+
+def _write_funding(df: pd.DataFrame, target: Path, compress: bool) -> None:
+    out = df.copy()
+    out.insert(0, "日期时间(北京)",
+               (out.index + pd.Timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S"))
+    out.to_csv(target, index=False, encoding="utf-8-sig",
+               compression="gzip" if compress else None)
+
+
+def funding_interval_hours(idx: pd.DatetimeIndex) -> float:
+    """Modal spacing between settlements, in hours.
+
+    Not a formality: Binance settles most pairs every 8 hours but some every 4,
+    and switches a pair temporarily during extreme volatility.  A mean rate
+    "per period" is therefore not comparable across symbols, and comparing them
+    without normalising to a daily rate reverses the ranking outright -- TAO at
+    +0.15bp per 4h period is +0.91bp/day, against BTC at +0.60bp per 8h period,
+    which is +1.81bp/day.
+    """
+    if len(idx) < 3:
+        return float("nan")
+    d = pd.Series(idx).diff().dropna().dt.total_seconds() / 3600.0
+    return float(d.mode().iloc[0]) if len(d.mode()) else float(d.median())
+
+
+def ingest_funding(src: Path, dest: Path | None = None, dry_run: bool = False,
+                   compress: bool = True, merge: bool = False) -> pd.DataFrame:
+    """Same discipline as the klines: merge onto history, count restatements.
+
+    Funding is settled history -- unlike a kline it is never "still forming" --
+    so ANY disagreement on an overlapping timestamp is a restatement, with no
+    final-bar exemption to hide behind.
+    """
+    dest = (dest or D.DATA_DIR) / "funding"
+    rows = []
+    for path in sorted(src.glob("*_funding.csv")) + sorted(src.glob("*_funding.csv.gz")):
+        m = FUND_NAME.match(path.name.split(".")[0])
+        if not m:
+            continue
+        sym = m.group("symbol").upper()
+        new = _load_funding(path)
+        target = dest / (f"{sym}_funding.csv.gz" if compress else f"{sym}_funding.csv")
+        extra = {"added": len(new), "overlap": 0, "restated": 0}
+        out = new
+        old_path = target if target.exists() else dest / f"{sym}_funding.csv"
+        if merge and old_path.exists():
+            old = _load_funding(old_path)
+            overlap = old.index.intersection(new.index)
+            col = "funding_rate"
+            diff = (old.loc[overlap, col].astype(float)
+                    - new.loc[overlap, col].astype(float)).abs()
+            extra = {"added": int(len(new.index.difference(old.index))),
+                     "overlap": int(len(overlap)),
+                     "restated": int((diff > 1e-12).sum())}
+            out = pd.concat([old[~old.index.isin(new.index)], new]).sort_index()
+        rate = out["funding_rate"].astype(float)
+        hrs = funding_interval_hours(out.index)
+        rows.append({"symbol": sym, "rows": len(out),
+                     "first": out.index[0], "last": out.index[-1],
+                     "interval_h": hrs,
+                     "mean_bp_period": round(rate.mean() * 1e4, 4),
+                     "mean_bp_day": round(rate.mean() * 1e4 * (24.0 / hrs), 4)
+                     if hrs and hrs == hrs else float("nan"),
+                     **extra})
+        if not dry_run:
+            dest.mkdir(parents=True, exist_ok=True)
+            _write_funding(out, target, compress)
+            if old_path != target:
+                old_path.unlink(missing_ok=True)
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="normalise exported klines into data/")
     ap.add_argument("src", type=Path, help="folder holding the exported CSVs")
@@ -253,6 +335,14 @@ def main() -> None:
     args = ap.parse_args()
 
     report = ingest(args.src, args.dest, args.dry_run, args.gzip, args.merge)
+    fund = ingest_funding(args.src, args.dest, args.dry_run, args.gzip, args.merge)
+    if not fund.empty:
+        print("\nfunding:")
+        print(fund.to_string(index=False))
+        bad_f = fund[fund["restated"] > 0]
+        if len(bad_f):
+            print(f"\n  WARNING: {int(bad_f['restated'].sum())} settled funding rows "
+                  f"were restated by the exchange")
     if report.empty:
         print("nothing ingested")
         return

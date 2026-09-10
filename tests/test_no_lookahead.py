@@ -103,15 +103,57 @@ def test_higher_tf_alignment_has_no_lookahead():
             f"HTF value at {t} is not the last CLOSED daily bar"
 
 
-def test_risk_engine_stop_is_pessimistic(daily):
-    """When stop and target both sit in one bar, the stop must win."""
-    sig = pd.Series(1.0, index=daily.index)
-    atr = I.atr(daily, 14)
-    tight = B.run_with_risk(daily, sig, stop_dist=atr * 0.1, take_dist=atr * 0.1,
-                            costs=B.Costs(0, 0), ann_factor=365.0)
-    loose = B.run_with_risk(daily, sig, stop_dist=atr * 5.0, take_dist=atr * 5.0,
-                            costs=B.Costs(0, 0), ann_factor=365.0)
-    assert tight.stats.total_return < loose.stats.total_return
+def _one_bar_frame(high: float, low: float, opens=(100.0, 100.0, 100.0)):
+    """Three bars whose middle one has the range under test."""
+    idx = pd.date_range("2024-01-01", periods=3, freq="D")
+    return pd.DataFrame({"open": list(opens),
+                         "high": [opens[0], high, opens[2]],
+                         "low": [opens[0], low, opens[2]],
+                         "close": list(opens)}, index=idx)
+
+
+def test_risk_engine_stop_is_pessimistic():
+    """When stop and target both sit in one bar, the stop must win.
+
+    The earlier version of this test compared total return between a tight and a
+    loose bracket on real bars and asserted the tight one did worse.  That never
+    tested the stated property: with a constant long signal the engine stays flat
+    after its first stop-out, so both runs held exactly ONE trade and the
+    assertion only compared two isolated outcomes.  It passed on 2023-2026 data
+    and flipped the moment 2022 was added, because the loose bracket's single
+    trade then landed in a bear market.  A tie-breaking rule is a property of the
+    engine, so it is now checked on a bar built to contain the tie.
+    """
+    sig = pd.Series([1.0, 1.0, 1.0], index=_one_bar_frame(120.0, 80.0).index)
+    dist = pd.Series([10.0, 10.0, 10.0], index=sig.index)
+
+    both = B.run_with_risk(_one_bar_frame(120.0, 80.0), sig, stop_dist=dist,
+                           take_dist=dist, costs=B.Costs(0, 0), ann_factor=365.0)
+    # entry 100, stop 90, target 110, and the bar reaches both -> filled at 90
+    assert both.rets.iloc[1] == pytest.approx(-0.10)
+
+    only_target = B.run_with_risk(_one_bar_frame(120.0, 95.0), sig, stop_dist=dist,
+                                  take_dist=dist, costs=B.Costs(0, 0), ann_factor=365.0)
+    assert only_target.rets.iloc[1] == pytest.approx(+0.10), \
+        "with the stop untouched the target must still fill"
+
+    only_stop = B.run_with_risk(_one_bar_frame(105.0, 80.0), sig, stop_dist=dist,
+                                take_dist=dist, costs=B.Costs(0, 0), ann_factor=365.0)
+    assert only_stop.rets.iloc[1] == pytest.approx(-0.10)
+
+
+def test_risk_engine_stays_flat_after_a_stop_until_the_signal_flips():
+    """The behaviour that made the old tie test vacuous, pinned down explicitly."""
+    idx = pd.date_range("2024-01-01", periods=5, freq="D")
+    df = pd.DataFrame({"open": [100.0] * 5, "high": [100.0, 120.0, 100.0, 100.0, 100.0],
+                       "low": [100.0, 80.0, 100.0, 100.0, 100.0],
+                       "close": [100.0] * 5}, index=idx)
+    sig = pd.Series(1.0, index=idx)
+    dist = pd.Series(10.0, index=idx)
+    r = B.run_with_risk(df, sig, stop_dist=dist, take_dist=dist,
+                        costs=B.Costs(0, 0), ann_factor=365.0)
+    assert (r.position.iloc[2:] == 0).all(), \
+        "a constant signal cannot re-arm the engine after a stop-out"
 
 
 def test_vortex_matches_definition(daily):

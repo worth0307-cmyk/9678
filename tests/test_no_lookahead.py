@@ -1014,3 +1014,92 @@ def test_dead_zone_is_the_cost_in_r_units():
     # an edge inside the zone loses in both directions
     tiny = 0.5 * e.dead_zone_at(0.02)
     assert tiny - e.dead_zone_at(0.02) < 0 and -tiny - e.dead_zone_at(0.02) < 0
+
+
+# ---------------------------------------------------------------- paper trading
+def test_paper_book_cannot_see_bars_after_its_asof():
+    """Replaying an old date must give the same book whether or not later data exists.
+
+    This is the property that separates a live generator from its backtest.
+    Binance serves the in-progress candle from the same endpoint as settled ones,
+    so a generator that takes the last row is trading on a bar that has not
+    finished, and no downstream check would notice.
+    """
+    from vibt import paper as PP
+
+    p = PP.Params()
+    full = D.load("1d", symbol="BTCUSDT")
+    asof = full.index[-40]
+
+    book = PP.generate(asof, p)
+    assert book.asof == asof
+    assert book.execute_at > asof, "execution must come after the bar that decided it"
+
+    # every reference price must be a CLOSE that had already printed
+    for sym, px in book.ref_price.dropna().items():
+        done = D.load("1d", symbol=sym)
+        done = done[done["close_time"] <= asof]
+        assert px == pytest.approx(float(done["close"].iloc[-1]))
+
+
+def test_paper_weights_are_dollar_neutral_and_unit_gross():
+    from vibt import paper as PP
+
+    book = PP.generate(D.load("1d", symbol="BTCUSDT").index[-5], PP.Params())
+    assert book.weights.sum() == pytest.approx(0.0, abs=1e-12)
+    assert book.weights.abs().sum() == pytest.approx(1.0, rel=1e-9)
+    assert (book.weights != 0).sum() >= 4, "a cross-section needs names on both sides"
+
+
+def test_paper_latest_complete_bar_excludes_a_forming_one():
+    from vibt import paper as PP
+
+    p = PP.Params()
+    full = D.load("1d", symbol="BTCUSDT")
+    # ask as of a moment INSIDE the final bar: it has not closed, so it is out
+    mid = full.index[-1] + pd.Timedelta(hours=6)
+    assert PP.latest_complete_bar(p, mid) <= full.index[-1]
+    just_before = full["close_time"].iloc[-1] - pd.Timedelta(minutes=1)
+    assert PP.latest_complete_bar(p, just_before) < full.index[-1]
+
+
+def test_paper_rebalance_schedule_is_honoured():
+    from vibt import paper as PP
+
+    p = PP.Params(rebalance_days=3)
+    asof = D.load("1d", symbol="BTCUSDT").index[-5]
+    assert PP.generate(asof, p, prev_rebalance=None).is_rebalance
+    assert PP.generate(asof, p, prev_rebalance=asof).is_rebalance is False
+    assert PP.generate(asof, p, asof - pd.Timedelta(days=2)).is_rebalance is False
+    assert PP.generate(asof, p, asof - pd.Timedelta(days=3)).is_rebalance
+
+
+def test_paper_orders_net_to_the_target_from_any_starting_book():
+    from vibt import paper as PP
+
+    book = PP.generate(D.load("1d", symbol="BTCUSDT").index[-5], PP.Params())
+    held = pd.Series(0.0, index=book.weights.index)
+    held.iloc[0] = 0.5
+    o = book.orders(held, equity=10_000)
+    assert np.allclose(o["current_w"] + o["delta_w"], o["target_w"])
+    assert o["target_notional"].sum() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_paper_reconcile_signs_slippage_against_the_traded_side():
+    """Paying up on a buy and receiving less on a sell must both read positive."""
+    from vibt import paper as PP
+
+    log = pd.DataFrame({
+        "asof": pd.to_datetime(["2026-01-01", "2026-01-01"]),
+        "execute_at": pd.to_datetime(["2026-01-02", "2026-01-02"]),
+        "symbol": ["BTCUSDT", "ETHUSDT"],
+        "trade_qty": [1.0, -1.0],          # one buy, one sell
+        "ref_price": [100.0, 100.0],
+        "fill_price": [100.1, 99.9],       # both worse than reference
+        "filled_at": pd.to_datetime(["2026-01-02 01:00", "2026-01-02 01:00"]),
+        "fee_paid": [0.0, 0.0],
+    })
+    r = PP.reconcile(log)
+    assert (r["slippage_bps"] > 0).all(), "adverse fills must not cancel out"
+    assert r["slippage_bps"].iloc[0] == pytest.approx(10.0, rel=1e-6)
+    assert r["slippage_bps"].iloc[1] == pytest.approx(10.0, rel=1e-6)

@@ -962,3 +962,55 @@ def test_breakeven_cost_reproduces_the_residual_result():
 
     assert EG.breakeven_cost(0.096, 441) * 1e4 == pytest.approx(2.18, abs=0.02)
     assert EG.breakeven_cost(0.096, 441) < 0.00065, "must read as untradeable"
+
+
+def test_reversed_edge_is_not_a_mirror_image():
+    """Taking the other side turns 1:b into 1:(1/b), so the edge shrinks by b."""
+    from vibt import edge as EG
+
+    fwd = EG.Edge(0.30, 3.0)
+    rev = fwd.reversed_edge()
+    assert rev.win == pytest.approx(0.70)
+    assert rev.payoff == pytest.approx(1 / 3)
+    # e_rev = -e_fwd / b, not -e_fwd
+    assert rev.expectancy == pytest.approx(-fwd.expectancy / 3.0)
+    # a low win rate with a high payoff is a WINNER; inverting it loses
+    assert fwd.expectancy > 0 and rev.expectancy < 0
+
+
+def test_reversal_only_pays_when_the_original_loses_by_more_than_costs():
+    from vibt import edge as EG
+
+    breakeven = EG.Edge(0.25, 3.0)          # 1:3 pays for itself at 25%
+    assert breakeven.expectancy == pytest.approx(0.0)
+    assert breakeven.reversed_edge().expectancy == pytest.approx(0.0)
+    # below breakeven the reversal turns positive gross, above it stays negative
+    assert EG.Edge(0.20, 3.0).reversed_edge().expectancy > 0
+    assert EG.Edge(0.30, 3.0).reversed_edge().expectancy < 0
+
+
+def test_forward_and_reversed_net_returns_sum_to_minus_twice_the_cost():
+    """The identity that makes "just invert it" fail: both sides pay the spread."""
+    daily = D.load("1d", symbol="BTCUSDT")
+    close = daily["close"]
+    m = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
+    pos = (m > m.ewm(span=9, adjust=False).mean()).astype(float) * 2 - 1
+
+    costs = B.Costs(4.5, 2.0)
+    fwd = B.run(daily, pos, costs, 365.0)
+    rev = B.run(daily, -pos, costs, 365.0)
+    total = fwd.rets + rev.rets
+    assert np.allclose(total, -(fwd.costs + rev.costs), atol=1e-15)
+    assert fwd.costs.sum() == pytest.approx(rev.costs.sum())
+    # and therefore they can never both be profitable
+    assert not (fwd.stats.total_return > 0 and rev.stats.total_return > 0)
+
+
+def test_dead_zone_is_the_cost_in_r_units():
+    from vibt import edge as EG
+
+    e = EG.Edge(0.51, 1.0, cost=0.00065)
+    assert e.dead_zone_at(0.02) == pytest.approx(2 * 0.00065 / 0.02)
+    # an edge inside the zone loses in both directions
+    tiny = 0.5 * e.dead_zone_at(0.02)
+    assert tiny - e.dead_zone_at(0.02) < 0 and -tiny - e.dead_zone_at(0.02) < 0

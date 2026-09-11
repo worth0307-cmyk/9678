@@ -125,6 +125,28 @@ class Edge:
         z_a, z_b = _z(1 - alpha), _z(power)
         return ((z_a + z_b) * self.sd_r / e) ** 2
 
+    # ---------------------------------------------------------------- 反向
+    def reversed_edge(self) -> "Edge":
+        """Take the other side of the same trade, at the same price levels.
+
+        Your stop goes where their target was and your target where their stop
+        was, so the win probability becomes 1-p and the payoff becomes 1/b.  The
+        unit of R changes too -- it is now b times wider -- which is why the
+        reversal of a 1:3 loser is a 1:0.33 winner and not a mirror image.
+        """
+        return Edge(1.0 - self.win, 1.0 / self.payoff, self.cost, self.sigma_daily)
+
+    def dead_zone_at(self, stop: float) -> float:
+        """|gross edge| below which NEITHER direction pays, in R at this stop.
+
+        Forward nets e - 2c/s and the reversal nets -e - 2c/s, so whatever the
+        rule is worth, the two directions together return exactly -4c/s: both
+        sides pay the spread.  A rule whose gross edge is smaller than 2c/s is
+        not a losing rule waiting to be inverted, it is a rule with nothing in it
+        in either direction.
+        """
+        return self.cost_r(stop)
+
     def verdict(self) -> dict:
         e = self.expectancy
         s = self.optimal_stop

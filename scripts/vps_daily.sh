@@ -83,6 +83,17 @@ START="$(date -u -d "${DAYS} days ago" +%Y-%m-%d 2>/dev/null \
        || date -u -v-"${DAYS}"d +%Y-%m-%d)"
 
 echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') UTC   增量抓取 ${START} 起" | tee -a "$LOG"
+
+# 无人值守（--write）应该在 00:0x UTC 跑。跑在别的时刻，唯一的解释是 cron 按
+# 本机时区计时、CRON_TZ 没生效 —— 而那正是最坏的失败方式：它照常出结果、照常
+# 推送，只是每天都晚若干小时，而这个仓库测过执行拖一天 Sharpe 掉 0.3~0.6。
+if [[ -n "$WRITE" && "$(date -u +%H)" != "00" ]]; then
+  {
+    echo "⚠️  当前 UTC 时刻是 $(date -u '+%H:%M')，不是 00:0x。"
+    echo "    无人值守的任务跑在这个时间，多半是 CRON_TZ 没生效（本机时区 $(date +%Z)）。"
+    echo "    确认： crontab -l   修法： timedatectl set-timezone UTC 然后重跑 vps_cron.sh"
+  } | tee -a "$LOG" >&2
+fi
 rm -rf "$OUT"
 run "$PY" scripts/fetch_binance.py \
   --symbols "$SYMBOLS" --intervals "$INTERVALS" \

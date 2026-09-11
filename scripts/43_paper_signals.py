@@ -109,7 +109,7 @@ def main() -> None:
     # has already gone.  Nothing downstream can tell the difference, so it has to
     # be said here.
     if args.asof is None:
-        lag_h = (pd.Timestamp.utcnow().tz_localize(None) - book.execute_at) \
+        lag_h = (pd.Timestamp.now("UTC").tz_localize(None) - book.execute_at) \
             .total_seconds() / 3600
         if lag_h > 6:
             print(f"""

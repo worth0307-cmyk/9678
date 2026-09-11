@@ -12,24 +12,53 @@
 跨币种的干净样本已经用完了（181 个从未参与开发的币在 `REPORT_RESMOM.md` 里用掉了）。
 **剩下唯一没被污染的资源是未来的时间。**
 
+## 两台机器
+
+这条链路横跨两台机器，而两台各缺一半：
+
+| | 能连币安 | 有仓库 + pandas |
+|---|---|---|
+| **VPS** | ✅ | 装之前没有 |
+| **Claude 的容器** | ❌（出口策略封了） | ✅ |
+
+所以日常运行放在 VPS 上。**一次性安装：**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/worth0307-cmyk/9678/claude/btcusdt-trading-system-hl6119/scripts/vps_setup.sh | bash
+```
+
+它会 clone 仓库、建 venv（新版 Debian/Ubuntu 有 PEP 668，直接 pip 会被拒）、
+装 pandas+numpy、自检，并确认这台机器确实连得上币安。幂等，可以重复跑。
+
 ## 每天怎么跑
 
 信号在日线收盘时形成，计划在**同一时刻**（00:00 UTC）成交。
 这个仓库测过：执行拖一天，Sharpe 掉 0.3~0.6。所以 00:00 UTC 之后尽快跑。
 
 ```bash
-# 0. 先刷新数据（币安在 Claude 的会话里是封的，要在能连的机器上抓）
-python -m vibt.ingest <新抓的目录> --merge --gzip
-
-# 1. 看今天该持什么、该下什么单
-python scripts/43_paper_signals.py --equity 10000
-
-# 2. 确认无误后记进日志（非再平衡日不会写）
-python scripts/43_paper_signals.py --equity 10000 --write
+bash ~/9678/scripts/vps_daily.sh            # 抓增量 -> 并库 -> 打印目标持仓
+bash ~/9678/scripts/vps_daily.sh --write    # 确认后记进日志
 ```
 
-数据过期超过 6 小时时脚本会警告——**过期的数据会产出一张格式完全正常、但属于过去某一天的持仓表**，
-下游没有任何东西能分辨，所以只能在这里提示。
+挂到 cron：
+
+```bash
+(crontab -l 2>/dev/null; echo "5 0 * * * bash $HOME/9678/scripts/vps_daily.sh >> \$HOME/paper.log 2>&1") | crontab -
+```
+
+`vps_daily.sh` 做的三件事，每一件失败都会停住而不是带着坏数据往下走：
+
+1. **增量抓取**，窗口默认 10 天而不是 1 天——**故意重叠**。上一次的最后一根 K 线
+   当时还在形成，而交易所偶尔改写已结算的历史；有重叠，`ingest --merge` 才能
+   区分「最后一根被补完」和「历史被改写」，后者会让之前所有回测失效。
+2. **并入 data/**，逐字段比对重叠区间并报告改写、缺口、异常 OHLC。
+3. **生成目标持仓**。
+
+数据过期超过 6 小时时会警告——**过期数据会产出一张格式完全正常、但属于过去某一天的
+持仓表**，下游没有任何东西能分辨，所以只能在生成处提示。
+
+单个币抓失败时脚本会显式报出来。下游其实是安全的（`latest_complete_bar` 取所有币
+的最小值，会退回到所有币都有数据的最后一天），但不说出来就成了静默降级。
 
 ## 成交之后
 

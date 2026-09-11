@@ -23,7 +23,11 @@ VENV="${VENV:-$HOME_DIR/.venv}"
 PY="$VENV/bin/python"
 DAYS="${DAYS:-10}"
 EQUITY="${EQUITY:-10000}"
-INTERVALS="${INTERVALS:-1d}"     # 纸面信号只读日线；要补 4h/1h 就改这里
+# 纸面信号只读日线，但三个周期必须一起刷新。只抓 1d 的话，1h/4h 会停在上一次的
+# 位置，而 ingest 的交叉校验会拿**完整的日线**去比**半天的 1h 重采样**，于是每天
+# 都报一条"1h->1d 不一致"。那不是数据问题，是我自己造出来的假警报——而一个每天
+# 都响的告警等于没有告警。10 天 x 6 币的 1h 只有 1440 根，不值得省。
+INTERVALS="${INTERVALS:-1h,4h,1d}"
 OUT="${OUT:-$HOME_DIR/.refresh}"
 SYMBOLS="${SYMBOLS:-BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,TAOUSDT,HYPEUSDT}"
 
@@ -105,7 +109,12 @@ run "$PY" -m vibt.ingest "$OUT" --merge --gzip || die "ingest 失败，data/ 未
 
 echo | tee -a "$LOG"
 echo "=== 今天的目标持仓" | tee -a "$LOG"
-BOOK="$("$PY" scripts/43_paper_signals.py --equity "$EQUITY" $WRITE 2>&1)"
+# 这一步之前没查退出码。信号生成一崩，$BOOK 里装的就是 traceback，
+# 脚本会把它当成持仓表推送出去然后 exit 0 —— 正是这个脚本声称要防的那种静默失败。
+if ! BOOK="$("$PY" scripts/43_paper_signals.py --equity "$EQUITY" $WRITE 2>&1)"; then
+  echo "$BOOK" | tee -a "$LOG"
+  die "信号生成失败"
+fi
 echo "$BOOK" | tee -a "$LOG"
 
 rm -rf "$OUT"     # 原始 CSV 已经并进 data/ 了，留着只会越堆越多

@@ -53,9 +53,16 @@ case "${1:-}" in
     # env -i 模拟 cron 的空环境，这是「手动跑得通、cron 跑不通」的常见原因
     env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin SHELL=/bin/sh \
       /bin/sh -c "bash $SCRIPT" 2>&1 | tail -25
+    # 必须立刻取。PIPESTATUS 只保留**最近一条**管线的状态，中间插一个 echo
+    # 就会被它自己的 0 覆盖掉 —— 第一版就是这么把一次失败报成了"退出码 0"。
+    rc="${PIPESTATUS[0]}"
     echo
-    echo "=== 退出码 ${PIPESTATUS[0]}（0 才算这条 cron 能跑）"
-    exit 0 ;;
+    if [[ "$rc" == "0" ]]; then
+      echo "=== 退出码 0 —— 这条 cron 能跑"
+    else
+      echo "=== 退出码 $rc —— **cron 跑不通**，先修好再等明天" >&2
+    fi
+    exit "$rc" ;;
 esac
 
 # ---------------------------------------------------------------- 时区

@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
-from scipy import stats as sps
 
 
 @dataclass
@@ -113,6 +112,12 @@ def deflated_sharpe(sharpe: float, n_trials: int, n_obs: int, ann_factor: float,
     Bailey & Lopez de Prado (2014).  Sharpe in/out are annualised; converted
     internally to per-observation.
     """
+    # scipy only for two normal quantiles, and only here.  Importing it at module
+    # scope pulled ~40MB into the daily signal path, which needs a rank and a
+    # weighted sum -- the VPS run died on ModuleNotFoundError for a dependency
+    # nothing in that path uses.
+    from scipy import stats as sps
+
     sharpe = float(sharpe)
     sr = sharpe / np.sqrt(ann_factor)
     if n_trials < 2 or n_obs < 3:

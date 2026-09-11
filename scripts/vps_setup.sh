@@ -58,7 +58,8 @@ if [[ ! -x "$VENV/bin/python" ]]; then
   }
 fi
 "$VENV/bin/python" -m pip install --quiet --upgrade pip
-# 纸面信号只要这两个；scipy 只有研究脚本用得到，日常链路不装
+# scipy 只有研究脚本（deflated Sharpe）用得到，而且那个 import 现在是惰性的，
+# 所以日常链路真的只要这两个。要在 VPS 上跑研究脚本就自己补： pip install scipy
 "$VENV/bin/python" -m pip install --quiet pandas numpy
 echo "  $("$VENV/bin/python" -c 'import pandas,numpy;print("pandas",pandas.__version__,"numpy",numpy.__version__)')"
 

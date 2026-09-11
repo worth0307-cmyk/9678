@@ -5,6 +5,7 @@
 #   bash ~/9678/scripts/vps_cron.sh --status   # 看现在装了什么
 #   bash ~/9678/scripts/vps_cron.sh --remove   # 卸载
 #   bash ~/9678/scripts/vps_cron.sh --test     # 立刻跑一次（不写日志），验证 cron 环境
+#   bash ~/9678/scripts/vps_cron.sh --probe    # 两分钟测定它会不会在 UTC 时刻触发
 #
 # 四件容易踩的事，这个脚本都处理了：
 #
@@ -66,6 +67,78 @@ case "${1:-}" in
     echo "已移除。现在的 crontab："
     current || echo "  （空）"
     exit 0 ;;
+  --probe)
+    # 探针只回答一个问题，但那是唯一重要的那个：**装好的这条任务，会不会在我
+    # 以为的那个绝对时刻触发？** 有两种失败会让它跑在别的时刻，而且都是静默的：
+    #
+    #   本机不是 UTC     任务靠 CRON_TZ 计时，而 CRON_TZ 是 cron 的扩展语法，
+    #                    不认的版本会**默默**退回本机时区
+    #   本机刚改成 UTC   守护进程可能还缓存着旧时区，不重启就还按旧的算
+    #
+    # 两种都表现为「照常出结果、照常推 Telegram，只是每天都晚若干小时」，而这个
+    # 仓库测过执行拖一天 Sharpe 掉 0.3~0.6。等明天看日志也能发现，但要浪费一天。
+    #
+    # 做法：用**和正式任务完全相同的时区写法**，把一个只 touch 文件的任务排在
+    # 「UTC 当前时刻 + 2 分钟」。触发了，就说明这套写法在这台机器上确实成立。
+    PROBE_FILE="$HOME_DIR/.cron_probe"
+    PB="# vibt-cron-probe BEGIN"
+    PE="# vibt-cron-probe END"
+    TZNAME="$(date +%Z)"
+
+    # 先把当前 crontab 存成文件，收尾时原样写回 —— 而不是收尾时再从 crontab -l
+    # 重新推导一遍。因为那条命令万一在收尾的时刻失败（管道左边空了也照样成立），
+    # 推导出来的就是个空 crontab，正式任务会跟着一起没掉。
+    # 顺手滤掉上一次异常退出可能留下的探针区块。
+    BACKUP="$(mktemp)"
+    crontab -l 2>/dev/null | awk -v b="$PB" -v e="$PE" '
+      $0 == b { skip = 1; next } $0 == e { skip = 0; next } !skip { print }' >"$BACKUP"
+    cleanup_probe() {
+      crontab "$BACKUP" 2>/dev/null || crontab -r 2>/dev/null
+      rm -f "$BACKUP" "$PROBE_FILE"
+    }
+    trap cleanup_probe EXIT INT TERM
+
+    rm -f "$PROBE_FILE"
+    HH="$(date -u -d '+2 minutes' +%H 2>/dev/null || date -u -v+2M +%H)"
+    MM="$(date -u -d '+2 minutes' +%M 2>/dev/null || date -u -v+2M +%M)"
+    { cat "$BACKUP"
+      echo "$PB"
+      [[ "$TZNAME" != "UTC" ]] && echo "CRON_TZ=UTC"
+      echo "${MM#0} ${HH#0} * * * touch $PROBE_FILE"
+      echo "$PE"
+    } | crontab -
+
+    echo "=== cron 触发时刻探针"
+    echo "  本机时区 $TZNAME，UTC 现在 $(date -u '+%H:%M:%S')"
+    if [[ "$TZNAME" != "UTC" ]]; then
+      echo "  探针带 CRON_TZ=UTC（和正式任务一样），排在 UTC ${HH}:${MM}"
+    else
+      echo "  探针排在 UTC ${HH}:${MM}（本机就是 UTC，正式任务不需要 CRON_TZ）"
+    fi
+    echo "  等待最多 3 分钟 ..."
+    for _ in $(seq 1 36); do
+      [[ -f "$PROBE_FILE" ]] && break
+      sleep 5
+    done
+    echo
+    if [[ -f "$PROBE_FILE" ]]; then
+      echo "✅ 触发了 —— 这台机器上 00:05 UTC 就是 00:05 UTC，不用再改。"
+      rc=0
+    elif [[ "$TZNAME" != "UTC" ]]; then
+      echo "❌ 没触发 —— 这版 cron **不认 CRON_TZ**，任务会按本机时区（$TZNAME）的 00:05 跑。"
+      echo "   修法（把整机设成 UTC，最省事也最不容易再出错）："
+      echo "     timedatectl set-timezone UTC && systemctl restart cron"
+      echo "     bash $HOME_DIR/scripts/vps_cron.sh && bash $HOME_DIR/scripts/vps_cron.sh --probe"
+      rc=1
+    else
+      echo "❌ 没触发 —— 本机是 UTC，但 cron 在这个时刻没跑任务。"
+      echo "   最常见的原因是**刚改过时区，守护进程还缓存着旧的**："
+      echo "     systemctl restart cron   # 或 crond / cronie，看发行版"
+      echo "     bash $HOME_DIR/scripts/vps_cron.sh --probe   # 再验一次"
+      echo "   其次是 cron 根本没在跑： systemctl status cron"
+      rc=1
+    fi
+    exit "$rc" ;;
   --test)
     echo "=== 用 cron 那套环境跑一次（--write 不加，不会写日志）"
     # env -i 模拟 cron 的空环境，这是「手动跑得通、cron 跑不通」的常见原因
@@ -110,15 +183,16 @@ echo "=== 已安装"
 current | awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
   $0 == b { inb = 1 } inb { print } $0 == e { inb = 0 }'
 
-# CRON_TZ 是 Vixie cron 的扩展，不是所有实现都支持。装完当场验一次比等明天强：
-# 如果 cron 没认这个变量，任务会按本机时区跑，而本机是 CST 的话就晚 16 小时。
 if [[ -n "$TZLINE" ]]; then
   echo
-  echo "⚠️  CRON_TZ 是 cron 的扩展语法，不是所有版本都支持。"
-  echo "    明天第一次跑完之后，用这条确认它真的在 00:0x UTC 跑了："
-  echo "      head -1 $LOGFILE        # 第一行会打印实际的 UTC 运行时刻"
-  echo "    如果那个时刻不是 00:0x，说明 CRON_TZ 没生效，改成把整机设成 UTC："
-  echo "      timedatectl set-timezone UTC && bash \$0"
+  echo "⚠️  CRON_TZ 是 cron 的扩展语法，不是所有版本都支持，而不支持的表现是"
+  echo "    **静默**退回本机时区 —— 任务照常出结果、照常推送，只是每天晚若干小时。"
+  echo "    别等明天看日志，两分钟就能测定： bash \$0 --probe"
+else
+  echo
+  echo "本机时区已经是 UTC，不需要 CRON_TZ —— 这是最稳的形态。"
+  echo "如果时区是**刚刚**改成 UTC 的，cron 守护进程可能还缓存着旧的，先重启再验："
+  echo "  systemctl restart cron && bash \$0 --probe"
 fi
 
 # ---------------------------------------------------------------- 日志轮转
@@ -172,6 +246,9 @@ cat <<EOF
 
   立刻验一次 cron 环境跑不跑得通（这和手动跑不是一回事）：
     bash $HOME_DIR/scripts/vps_cron.sh --test
+
+  再验一次它会不会在**对的时刻**触发（两分钟，不用等明天）：
+    bash $HOME_DIR/scripts/vps_cron.sh --probe
 
   看状态 / 日志：
     bash $HOME_DIR/scripts/vps_cron.sh --status

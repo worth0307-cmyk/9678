@@ -45,20 +45,34 @@ bash ~/9678/scripts/vps_daily.sh --write    # 确认后记进日志
 ```bash
 bash ~/9678/scripts/vps_cron.sh            # 安装
 bash ~/9678/scripts/vps_cron.sh --test     # 用 cron 的空环境验一次
+bash ~/9678/scripts/vps_cron.sh --probe    # 验它会不会在对的时刻触发（两分钟）
 bash ~/9678/scripts/vps_cron.sh --status   # 看装了什么、日志到哪了
 bash ~/9678/scripts/vps_cron.sh --remove   # 卸载
 ```
 
-不要手写那行 crontab，有三个坑：
+不要手写那行 crontab，有四个坑：
 
 | 坑 | 后果 | 脚本怎么处理 |
 |---|---|---|
-| **时区** | `5 0 * * *` 是**本机时区**的 00:05，不是 UTC | 本机不是 UTC 时自动写 `CRON_TZ=UTC` |
+| **时区** | `5 0 * * *` 是**本机时区**的 00:05，不是 UTC | 本机不是 UTC 时自动写 `CRON_TZ=UTC`；`--probe` 当场验它生没生效 |
+| **行尾注释** | crontab 的环境行不认，`CRON_TZ=UTC # mark` 会把时区设成字面量 `UTC # mark` | 标记用独立的 `BEGIN`/`END` 行，不贴行尾 |
 | **PATH** | cron 的 PATH 极简，`curl` 之类可能找不到 | 在任务行里显式设 PATH |
 | **日志** | 一年后那个文件会很大 | 装 logrotate 配置（周轮转，留 8 份） |
 
+装完有两件事值得当场验，它们查的不是同一个问题：
+
 `--test` 用 `env -i` 模拟 cron 的空环境跑一次——**「手动跑得通、cron 跑不通」几乎
-总是环境差异**，值得在装完当场验，而不是等明天发现没跑。
+总是环境差异**。它查的是「跑起来会不会崩」。
+
+`--probe` 把一个只 `touch` 文件的任务排在「UTC 当前时刻 + 2 分钟」，用**和正式任务
+完全相同的时区写法**，然后等它触发。它查的是「会不会在**我以为的那个时刻**跑」。
+这件事有两种静默的失败法：本机不是 UTC 时 `CRON_TZ` 可能压根不被这版 cron 认；
+本机**刚**被改成 UTC 时守护进程可能还缓存着旧时区（`systemctl restart cron`）。
+两种都表现为**照常出结果、照常推 Telegram，只是每天晚若干小时**——而执行拖一天
+Sharpe 掉 0.3~0.6。等明天看日志也能发现，但那要浪费一天。
+
+> 最稳的形态是整机就用 UTC（`timedatectl set-timezone UTC`），
+> 那样 crontab 里连 `CRON_TZ` 都不需要，少一个能静默失效的东西。
 
 cron 里用的是 `--write`：无人值守就是要记录。那个「先看再确认」的两步是给人用的，
 纸面阶段没有真金白银，**记下意图本身才是目的**。

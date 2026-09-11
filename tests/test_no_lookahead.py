@@ -895,3 +895,70 @@ def test_dollar_neutral_book_can_still_carry_factor_exposure():
     expo = F.portfolio_factor_exposure(w, load)
     assert float(w.sum(axis=1).iloc[0]) == pytest.approx(0.0), "book is dollar-neutral"
     assert float(expo.iloc[0]) == pytest.approx(0.4), "but it is long the factor"
+
+
+# ------------------------------------------------------------------ edge math
+def test_edge_expectancy_matches_the_definition():
+    from vibt import edge as EG
+
+    assert EG.Edge(0.51, 1.0).expectancy == pytest.approx(0.02)
+    assert EG.Edge(0.45, 3.0).expectancy == pytest.approx(0.80)
+    # the case the win rate alone hides: 51% is a loser once the win is smaller
+    assert EG.Edge(0.51, 0.8).expectancy < 0
+
+
+def test_edge_optimal_stop_gives_exactly_half_the_edge_to_costs():
+    """s* = 4c/e, and there the net is e/2 whatever the edge happens to be."""
+    from vibt import edge as EG
+
+    for win, payoff, cost in ((0.51, 1.0, 0.00065), (0.55, 1.0, 0.0002),
+                              (0.31, 2.7, 0.00065)):
+        e = EG.Edge(win, payoff, cost)
+        s = e.optimal_stop
+        assert s == pytest.approx(4 * cost / e.expectancy)
+        assert e.net_expectancy(s) == pytest.approx(e.expectancy / 2)
+
+
+def test_edge_closed_form_sharpe_matches_a_brute_force_search():
+    """The analytic maximum must agree with scanning the stop width."""
+    from vibt import edge as EG
+
+    e = EG.Edge(0.53, 1.0, 0.00065, 0.0357)
+    grid = np.linspace(0.002, 0.60, 6000)
+    best = max(e.sharpe(s) for s in grid)
+    assert e.max_sharpe == pytest.approx(best, rel=1e-3)
+    assert e.sharpe(e.optimal_stop) == pytest.approx(e.max_sharpe, rel=1e-9)
+
+
+def test_edge_sharpe_grows_with_the_square_of_the_edge():
+    """Doubling the edge quadruples the attainable Sharpe -- the whole point."""
+    from vibt import edge as EG
+
+    a = EG.Edge(0.51, 1.0)          # e = 0.02
+    b = EG.Edge(0.52, 1.0)          # e = 0.04
+    assert b.max_sharpe / a.max_sharpe == pytest.approx(4.0, rel=0.02)
+
+
+def test_edge_trades_to_confirm_is_the_familiar_15000():
+    from vibt import edge as EG
+
+    n = EG.Edge(0.51, 1.0).trades_to_confirm()
+    assert 14_000 < n < 17_000
+    assert EG.Edge(0.49, 1.0).trades_to_confirm() == float("inf"), \
+        "a negative edge is never confirmed, however long you wait"
+
+
+def test_normal_quantile_approximation_is_accurate():
+    from scipy import stats as sstats
+    from vibt import edge as EG
+
+    for q in (0.01, 0.05, 0.5, 0.8, 0.95, 0.975, 0.999):
+        assert EG._z(q) == pytest.approx(sstats.norm.ppf(q), abs=1e-6)
+
+
+def test_breakeven_cost_reproduces_the_residual_result():
+    """+9.6% gross at 441x turnover is 2.2bp of room -- 38 号脚本's verdict."""
+    from vibt import edge as EG
+
+    assert EG.breakeven_cost(0.096, 441) * 1e4 == pytest.approx(2.18, abs=0.02)
+    assert EG.breakeven_cost(0.096, 441) < 0.00065, "must read as untradeable"

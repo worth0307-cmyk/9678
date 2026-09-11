@@ -300,7 +300,7 @@ vibt/
   edge.py         边际算术：胜率x赔率x成本x波动率 -> 最优止损、可达 Sharpe、确认所需笔数
   paper.py        纸面信号：只用已收盘的 K 线、可重放、可与真实成交对账
 scripts/          01~43，研究过程按顺序可复现
-                  vps_setup.sh / vps_daily.sh = VPS 上的安装与每日运行
+                  vps_setup.sh / vps_daily.sh / vps_cron.sh = VPS 安装、每日运行、挂 cron
                   10~11 = VI-Dashboard 通道打法的事件研究与回测
                   24/31 = 网格与马丁；25~28 = RSI 加仓；29~30 = MACD 金叉
                   32~36 = 六均线系统的开仓法、平仓法、分币种与主流币

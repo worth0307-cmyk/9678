@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 state.json
 .venv/
+.env
+.refresh/
+# paper/signals.csv 故意不忽略：git 历史是这份日志的防篡改时间证明，
+# 能证明信号是在结果揭晓之前写下的，这比省掉合并冲突重要得多。

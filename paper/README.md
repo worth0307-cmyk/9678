@@ -40,11 +40,54 @@ bash ~/9678/scripts/vps_daily.sh            # 抓增量 -> 并库 -> 打印目�
 bash ~/9678/scripts/vps_daily.sh --write    # 确认后记进日志
 ```
 
-挂到 cron：
+## 挂成全自动
 
 ```bash
-(crontab -l 2>/dev/null; echo "5 0 * * * bash $HOME/9678/scripts/vps_daily.sh >> \$HOME/paper.log 2>&1") | crontab -
+bash ~/9678/scripts/vps_cron.sh            # 安装
+bash ~/9678/scripts/vps_cron.sh --test     # 用 cron 的空环境验一次
+bash ~/9678/scripts/vps_cron.sh --status   # 看装了什么、日志到哪了
+bash ~/9678/scripts/vps_cron.sh --remove   # 卸载
 ```
+
+不要手写那行 crontab，有三个坑：
+
+| 坑 | 后果 | 脚本怎么处理 |
+|---|---|---|
+| **时区** | `5 0 * * *` 是**本机时区**的 00:05，不是 UTC | 本机不是 UTC 时自动写 `CRON_TZ=UTC` |
+| **PATH** | cron 的 PATH 极简，`curl` 之类可能找不到 | 在任务行里显式设 PATH |
+| **日志** | 一年后那个文件会很大 | 装 logrotate 配置（周轮转，留 8 份） |
+
+`--test` 用 `env -i` 模拟 cron 的空环境跑一次——**「手动跑得通、cron 跑不通」几乎
+总是环境差异**，值得在装完当场验，而不是等明天发现没跑。
+
+cron 里用的是 `--write`：无人值守就是要记录。那个「先看再确认」的两步是给人用的，
+纸面阶段没有真金白银，**记下意图本身才是目的**。
+
+## 通知（可选，但强烈建议）
+
+没有通知的话，你只能 SSH 上去看日志才知道今天该做什么，而且**任务静默失败几个星期
+都不会有人发现**——那段时间的数据永远拿不回来了。
+
+Telegram：和 `@BotFather` 建个 bot 拿 token，给它发条消息后从
+`https://api.telegram.org/bot<token>/getUpdates` 找到 chat id，然后：
+
+```bash
+cat > ~/9678/.env <<'EOF'
+TG_TOKEN=123456:AAxxxxxxxxxxxxxxxxxxxxx
+TG_CHAT=123456789
+EOF
+chmod 600 ~/9678/.env
+```
+
+`.env` 已经在 `.gitignore` 里，不会进仓库。配好之后每天会推送目标持仓，
+并在这三种情况下告警：抓取失败、部分币种缺失、**交易所改写了已结算的历史**
+（最后这条会让之前所有回测失效，不该只躺在日志里）。
+
+## 关于 `signals.csv` 为什么进 git
+
+它**故意没有**被 gitignore。git 历史本身就是这份日志的防篡改时间证明——
+能证明每条信号是在结果揭晓**之前**写下的。对一个「事前记录、事后对账」的实验来说，
+这个性质比省掉合并冲突重要得多。VPS 上定期 `git add paper/signals.csv && git commit` 即可。
 
 `vps_daily.sh` 做的三件事，每一件失败都会停住而不是带着坏数据往下走：
 

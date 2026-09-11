@@ -30,6 +30,29 @@ curl -sSL https://raw.githubusercontent.com/worth0307-cmyk/9678/claude/btcusdt-t
 它会 clone 仓库、建 venv（新版 Debian/Ubuntu 有 PEP 668，直接 pip 会被拒）、
 装 pandas+numpy、自检，并确认这台机器确实连得上币安。幂等，可以重复跑。
 
+### 在 VPS 上 `git pull` 失败时
+
+`data/*.csv.gz` 这 18 个文件是**被 git 跟踪的**，而 VPS 每天都会重写它们。
+于是 VPS 的工作区从第一次跑完就一直是「脏」的，而且和仓库里那份快照
+**每天多差一天**。平时无所谓——只要上游没动 `data/`，`git pull` 照常快进。
+
+但只要仓库那边提交过 `data/`，下一次 `git pull` 就会硬失败：
+
+```
+error: Your local changes to the following files would be overwritten by merge:
+        data/BTCUSDT_1d.csv.gz
+```
+
+这是**好事**：它宁可停下也不覆盖你的新数据。丢掉本地改动再拉就行——
+
+```bash
+cd ~/9678 && git checkout -- data/ && git pull
+```
+
+之所以安全，是因为下一次 `vps_daily.sh` 默认回抓 10 天并 `--merge` 合并。
+**前提是仓库那份快照落后不超过 10 天**；落后更多就会留一个洞（`ingest` 会报缺口），
+那时候用 `DAYS=60 bash scripts/vps_daily.sh` 把窗口开大一次补回来。
+
 ## 每天怎么跑
 
 信号在日线收盘时形成，计划在**同一时刻**（00:00 UTC）成交。

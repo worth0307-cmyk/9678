@@ -37,13 +37,30 @@ EQUITY="${EQUITY:-10000}"
 
 current() { crontab -l 2>/dev/null || true; }
 
-# 删掉 BEGIN..END 之间（含两端）的所有行，其余原样保留
+# 删掉 BEGIN..END 之间（含两端）的所有行，其余原样保留。
+# 也删掉把标记贴在行尾的旧格式行：第一版是那么写的，而只认 BEGIN/END 的话，
+# 那些行会在每次重装时**存活下来**，于是同一个任务被装了两遍、每天同时跑两个实例。
 without_ours() {
-  current | awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
-    $0 == b { skip = 1; next }
-    $0 == e { skip = 0; next }
-    !skip   { print }
+  current | awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v m="$MARK" '
+    $0 == b       { skip = 1; next }
+    $0 == e       { skip = 0; next }
+    skip          { next }
+    index($0, m)  { next }
+    { print }
   '
+}
+
+# 先把新内容整个生成到一个文件，再一次性写回，而不是 `without_ours | crontab -`。
+# 那种写法让读（crontab -l）和写（crontab -）在同一条管线里并发跑，读到什么取决于
+# 两边谁先动手。真正的 crontab 是先写临时文件再 rename，读的一侧握着旧 inode，
+# 所以碰巧是安全的 —— 但整个 crontab 是用户的东西，不该建立在「碰巧」上面。
+replace_crontab() {
+  local new; new="$(mktemp)"
+  cat >"$new"
+  crontab - <"$new"
+  local rc=$?
+  rm -f "$new"
+  return "$rc"
 }
 
 case "${1:-}" in
@@ -64,7 +81,7 @@ case "${1:-}" in
     fi
     exit 0 ;;
   --remove)
-    without_ours | crontab -
+    without_ours | replace_crontab
     echo "已移除。现在的 crontab："
     current || echo "  （空）"
     exit 0 ;;
@@ -107,7 +124,7 @@ case "${1:-}" in
       [[ "$TZNAME" != "UTC" ]] && echo "CRON_TZ=UTC"
       echo "${MM#0} ${HH#0} * * * touch $PROBE_FILE"
       echo "$PE"
-    } | crontab -
+    } | replace_crontab
 
     echo "=== cron 触发时刻探针"
     echo "  本机时区 $TZNAME，UTC 现在 $(date -u '+%H:%M:%S')"
@@ -158,6 +175,22 @@ case "${1:-}" in
         '$0 == b { inb = 1 } inb { print "       " $0 } $0 == e { inb = 0 }'
     else
       bad "crontab 里没有本项目的区块 —— 重装： bash $0"
+    fi
+    # 上面只看了区块**里面**。旧版把标记贴在行尾，那种行不在任何区块里，
+    # 重装也删不掉它 —— 于是同一个任务装了两遍，每天 00:05 同时起两个实例，
+    # 并发重写同一批 data/*.csv.gz，并且都在还空着的日志上判定「今天该再平衡」，
+    # 各写一本账。区块看着永远是干净的，所以这里要数**整个** crontab。
+    NJOB="$(current | grep -c 'vps_daily\.sh' || true)"
+    if [[ "${NJOB:-0}" -gt 1 ]]; then
+      bad "整个 crontab 里有 $NJOB 条 vps_daily.sh —— 它们会同时跑，互相破坏"
+      echo "       crontab 全文（注意区块外面的行）："
+      current | sed 's/^/       /'
+      echo "       清掉： bash $0 --remove && bash $0"
+    elif [[ "${NJOB:-0}" == "1" ]]; then
+      ok "整个 crontab 里只有 1 条 vps_daily.sh"
+    fi
+    if grep -q "跳过：另一个实例" "$LOGFILE" 2>/dev/null; then
+      warn "日志里出现过「跳过：另一个实例」—— 有重复的任务或手动运行撞上了 cron"
     fi
 
     echo
@@ -235,13 +268,19 @@ for s in D.available_symbols(require=("1d",)):
 print(f"  应有到 {want}")
 for r in rows:
     print("       " + r)
-sys.exit(1 if lag else 0)
+# 3 = 确实落后。用一个专门的码，才能和「这段自己崩了」区分开：否则 pandas
+# 没装、data/ 读不动，都会被报成「数据落后」，而一个分不清「查出问题」和
+# 「没查成」的检查，两种情况下都在骗人。
+sys.exit(3 if lag else 0)
 PY
       # 立刻取。中间随便插一句别的，$? 就变成那句的状态了 —— --test 当初
       # 就是这么把一次失败报成「退出码 0」的。
       rc_data=$?
-      if [[ "$rc_data" == "0" ]]; then ok "所有币都到最新一根已收盘日线"
-      else bad "有币种的数据落后 —— 抓取或 ingest 没真正生效"; fi
+      case "$rc_data" in
+        0) ok "所有币都到最新一根已收盘日线" ;;
+        3) bad "有币种的数据落后 —— 抓取或 ingest 没真正生效" ;;
+        *) warn "数据检查没跑起来（退出码 $rc_data），这一项没结论" ;;
+      esac
     else
       warn "找不到 $VENV/bin/python，跳过数据检查"
     fi
@@ -257,7 +296,34 @@ PY
       bad "既没写、也没说今天不是再平衡日"
     fi
     if [[ -f "$SIG" ]]; then
-      ok "$SIG 共 $(( $(wc -l < "$SIG") - 1 )) 行"
+      # 行数本身就是个对账工具：一本账 = 每个币一行。6 个币跑了一夜却有 12 行，
+      # 说明同一天被写了两本 —— 而那两本会把再平衡的节奏也一起算乱。
+      if [[ -x "$VENV/bin/python" ]]; then
+        "$VENV/bin/python" - "$SIG" <<'PY'
+import sys
+import pandas as pd
+
+df = pd.read_csv(sys.argv[1])
+n_books = df.groupby("asof")["generated_at"].nunique()
+print(f"  {len(df)} 行 / {len(n_books)} 个信号日 / 每日 {len(df) // max(len(n_books), 1)} 行")
+dup = n_books[n_books > 1]
+if len(dup):
+    print("  同一个信号日写了不止一本账：")
+    for d, n in dup.items():
+        print(f"       {d}   {n} 本")
+    sys.exit(3)      # 3 = 真有重复；别的非零码代表这段自己没跑起来
+sys.exit(0)
+PY
+        rc_sig=$?
+        case "$rc_sig" in
+          0) ok "每个信号日恰好一本账" ;;
+          3) bad "有重复的账 —— 去重之前先备份 $SIG" ;;
+          *) warn "账目检查没跑起来（退出码 $rc_sig），这一项没结论"
+             echo "       行数 $(( $(wc -l < "$SIG") - 1 ))（6 个币的话，一天应当是 6 行）" ;;
+        esac
+      else
+        ok "$SIG 共 $(( $(wc -l < "$SIG") - 1 )) 行"
+      fi
       echo "       最后两行（截断显示）："
       tail -2 "$SIG" | cut -c1-150 | sed 's/^/       /'
     else
@@ -315,7 +381,7 @@ JOB="5 0 * * * PATH=/usr/local/bin:/usr/bin:/bin EQUITY=$EQUITY bash $SCRIPT --w
   [[ -n "$TZLINE" ]] && echo "$TZLINE"
   echo "$JOB"
   echo "$END_MARK"
-} | crontab -
+} | replace_crontab
 
 echo
 echo "=== 已安装"

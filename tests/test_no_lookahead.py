@@ -949,7 +949,10 @@ def test_edge_trades_to_confirm_is_the_familiar_15000():
 
 
 def test_normal_quantile_approximation_is_accurate():
-    from scipy import stats as sstats
+    # scipy 是可选的：`_z` 存在的理由就是让 VPS 上那条不装 scipy 的日常链路能跑。
+    # 所以这个测试在没有 scipy 的机器上应当**跳过**而不是失败 —— 它要对照的那个
+    # 参照物不在，不代表被测的东西坏了。硬 import 会让「scipy 可选」这句话变成假的。
+    sstats = pytest.importorskip("scipy.stats")
     from vibt import edge as EG
 
     for q in (0.01, 0.05, 0.5, 0.8, 0.95, 0.975, 0.999):

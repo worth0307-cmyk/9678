@@ -53,6 +53,23 @@ esac
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT
 
+# ---------------------------------------------------------------- 单实例
+# 两个实例同时跑会互相破坏，而且是**看不出来**的那种：它们并发重写同一批
+# data/*.csv.gz，并且都会在还是空的 signals.csv 上判定「今天该再平衡」，
+# 于是同一天写进两本账，再平衡的节奏跟着算乱。重复的 crontab 行、或者手动
+# 跑撞上 cron，都会造成这个。拿不到锁就安静退出 —— 那一次本来就不该跑。
+# 前缀用 "---" 而不是 "==="，才不会被 --verify 当成一次真的运行。
+LOCKFILE="$HOME_DIR/.daily.lock"
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$LOCKFILE" || { echo "打不开锁文件 $LOCKFILE" >&2; exit 1; }
+  if ! flock -n 9; then
+    echo "--- $(date -u '+%Y-%m-%d %H:%M:%S') UTC   跳过：另一个实例正在跑（$LOCKFILE）"
+    exit 0
+  fi
+else
+  echo "⚠️  这台机器没有 flock，无法保证单实例运行" >&2
+fi
+
 # ---------------------------------------------------------------- 通知
 # 可选。没配就只写日志——一个没配通知的 cron 任务仍然应该能跑。
 notify() {

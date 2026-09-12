@@ -6,6 +6,7 @@
 #   bash ~/9678/scripts/vps_cron.sh --remove   # 卸载
 #   bash ~/9678/scripts/vps_cron.sh --test     # 立刻跑一次（不写日志），验证 cron 环境
 #   bash ~/9678/scripts/vps_cron.sh --probe    # 两分钟测定它会不会在 UTC 时刻触发
+#   bash ~/9678/scripts/vps_cron.sh --verify   # 昨夜那次到底跑对了没有（七项体检）
 #
 # 四件容易踩的事，这个脚本都处理了：
 #
@@ -139,6 +140,144 @@ case "${1:-}" in
       rc=1
     fi
     exit "$rc" ;;
+  --verify)
+    # 「跑了没有」不是一个是非题，它有七种各自独立的坏法，而其中几种会**看起来像
+    # 成功**：任务被别的 crontab 覆盖掉了、跑在错误的时刻、抓取半路失败但脚本照常
+    # 出表、ingest 没把新数据并进去、写日志那一步静默跳过。一条一条看，才不会
+    # 看见 paper.log 里有字就以为没事。
+    VENV="${VENV:-$HOME_DIR/.venv}"
+    fail=0
+    ok()   { echo "  ✅ $*"; }
+    bad()  { echo "  ❌ $*"; fail=1; }
+    warn() { echo "  ⚠️  $*"; }
+
+    echo "=== 1/7  cron 任务还在不在"
+    if current | grep -qF "$BEGIN_MARK"; then
+      ok "crontab 里有本项目的区块"
+      current | awk -v b="$BEGIN_MARK" -v e="$END_MARK" \
+        '$0 == b { inb = 1 } inb { print "       " $0 } $0 == e { inb = 0 }'
+    else
+      bad "crontab 里没有本项目的区块 —— 重装： bash $0"
+    fi
+
+    echo
+    echo "=== 2/7  到底跑没跑"
+    if [[ ! -s "$LOGFILE" ]]; then
+      bad "$LOGFILE 不存在或是空的 —— cron 一次都没跑起来过"
+      echo "       查： systemctl status cron    再验： bash $0 --probe"
+      exit 1
+    fi
+    RUNRE='^=== [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} UTC'
+    LAST_HDR="$(grep -E "$RUNRE" "$LOGFILE" | tail -1)"
+    if [[ -z "$LAST_HDR" ]]; then
+      bad "日志里一条运行记录都没有 —— 它在打印第一行之前就死了"
+      echo "       日志最后 15 行："; tail -15 "$LOGFILE" | sed 's/^/       /'
+      exit 1
+    fi
+    LAST_DATE="$(awk '{print $2}' <<<"$LAST_HDR")"
+    LAST_TIME="$(awk '{print $3}' <<<"$LAST_HDR")"
+    RUNS="$(grep -cE "$RUNRE" "$LOGFILE")"
+    TODAY="$(date -u +%Y-%m-%d)"
+    ok "日志里 $RUNS 次运行，最后一次 $LAST_DATE $LAST_TIME UTC"
+    if [[ "$LAST_DATE" == "$TODAY" ]]; then
+      ok "最后一次就是今天（UTC $TODAY）"
+    else
+      bad "最后一次是 $LAST_DATE，今天是 $TODAY —— 中间漏跑了"
+    fi
+
+    echo
+    echo "=== 3/7  跑在 00:0x UTC 吗"
+    case "$LAST_TIME" in
+      00:0*) ok "$LAST_TIME —— 日线一收盘就跑了" ;;
+      *) bad "$LAST_TIME —— 不是 00:0x，时区没对上"
+         echo "       这是最坏的一种失败：照常出结果、照常推送，只是每天都晚。"
+         echo "       修： timedatectl set-timezone UTC && systemctl restart cron"
+         echo "           bash $0 && bash $0 --probe" ;;
+    esac
+
+    # 只看最后一次运行。日志是追加的，拿整个文件去 grep "失败" 会把三个星期前
+    # 修好的那次也算进来，于是每天都报错 —— 一个永远在响的检查等于没有检查。
+    LAST_BLOCK="$(awk -v re="$RUNRE" '$0 ~ re { buf = "" } { buf = buf $0 "\n" }
+                                      END { printf "%s", buf }' "$LOGFILE")"
+    echo
+    echo "=== 4/7  这一次跑成功了吗"
+    if grep -qE '❌|Traceback|抓取失败|ingest 失败|信号生成失败' <<<"$LAST_BLOCK"; then
+      bad "最后一次运行里有错："
+      grep -E '❌|Traceback|失败' <<<"$LAST_BLOCK" | head -6 | sed 's/^/       /'
+    elif ! grep -q "目标持仓" <<<"$LAST_BLOCK"; then
+      bad "没出「目标持仓」—— 跑到一半停住了"
+    else
+      ok "跑完整了，出了持仓表"
+    fi
+    grep -q "数据过期"       <<<"$LAST_BLOCK" && bad  "报了「数据过期」—— 这张表不是当天的"
+    grep -q "有币种抓取失败" <<<"$LAST_BLOCK" && bad  "有币种没抓到，持仓是用残缺的截面算的"
+    grep -q "^  RESTATED "   <<<"$LAST_BLOCK" && bad  "交易所改写了已结算的历史 —— 之前的回测要重跑"
+
+    echo
+    echo "=== 5/7  数据真的推进了吗"
+    # 单看日志不够：抓取和 ingest 都可能「成功」却什么都没并进去。
+    # 直接去问 data/ 里最新那根日线是哪天的。
+    if [[ -x "$VENV/bin/python" ]] && cd "$HOME_DIR"; then
+      "$VENV/bin/python" - <<'PY'
+import sys
+import pandas as pd
+from vibt import data as D
+
+# 此刻**已收盘**的最后一根日线，是昨天开盘的那根（它在今天 00:00 UTC 收）
+want = (pd.Timestamp.now("UTC").tz_localize(None).normalize()
+        - pd.Timedelta(days=1)).date()
+rows, lag = [], False
+for s in D.available_symbols(require=("1d",)):
+    last = D.load("1d", symbol=s).index[-1].date()
+    n = (want - last).days
+    rows.append(f"{s:9s} {last}  {'' if n <= 0 else f'落后 {n} 天'}")
+    lag = lag or n > 0
+print(f"  应有到 {want}")
+for r in rows:
+    print("       " + r)
+sys.exit(1 if lag else 0)
+PY
+      # 立刻取。中间随便插一句别的，$? 就变成那句的状态了 —— --test 当初
+      # 就是这么把一次失败报成「退出码 0」的。
+      rc_data=$?
+      if [[ "$rc_data" == "0" ]]; then ok "所有币都到最新一根已收盘日线"
+      else bad "有币种的数据落后 —— 抓取或 ingest 没真正生效"; fi
+    else
+      warn "找不到 $VENV/bin/python，跳过数据检查"
+    fi
+
+    echo
+    echo "=== 6/7  信号记下来了吗"
+    SIG="$HOME_DIR/paper/signals.csv"
+    if grep -q "已追加到" <<<"$LAST_BLOCK"; then
+      ok "这次写了一行"
+    elif grep -q "非再平衡日" <<<"$LAST_BLOCK"; then
+      ok "今天不是再平衡日（每 3 天一次），按设计不写 —— 这不是故障"
+    else
+      bad "既没写、也没说今天不是再平衡日"
+    fi
+    if [[ -f "$SIG" ]]; then
+      ok "$SIG 共 $(( $(wc -l < "$SIG") - 1 )) 行"
+      echo "       最后两行（截断显示）："
+      tail -2 "$SIG" | cut -c1-150 | sed 's/^/       /'
+    else
+      warn "$SIG 还不存在（第一次再平衡之前是正常的）"
+    fi
+
+    echo
+    echo "=== 7/7  下一次什么时候"
+    NOWS="$(date -u +%s)"
+    NEXT="$(date -u -d 'today 00:05' +%s 2>/dev/null || echo 0)"
+    [[ "$NEXT" -le "$NOWS" ]] && NEXT="$(date -u -d 'tomorrow 00:05' +%s)"
+    echo "  $(date -u -d "@$NEXT" '+%Y-%m-%d %H:%M UTC')  （还有 $(( (NEXT-NOWS)/3600 )) 小时 $(( ((NEXT-NOWS)%3600)/60 )) 分）"
+
+    echo
+    if [[ "$fail" == "0" ]]; then
+      echo "=== 七项全过"
+    else
+      echo "=== 上面有 ❌，先修那个" >&2
+    fi
+    exit "$fail" ;;
   --test)
     echo "=== 用 cron 那套环境跑一次（--write 不加，不会写日志）"
     # env -i 模拟 cron 的空环境，这是「手动跑得通、cron 跑不通」的常见原因

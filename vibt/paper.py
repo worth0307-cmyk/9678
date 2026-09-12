@@ -1,10 +1,19 @@
 """纸面信号生成器：每天输出目标持仓，记录下来，以后和真实成交对账.
 
-The point of this is measurement, not profit.  The strategy's breakeven cost on
-the out-of-sample panel was 6.38bp against 6.5bp charged, which means whether it
-works at all is decided by what fills you actually get -- and no amount of OHLC
-backtesting can answer that.  So the log is the deliverable: what was intended,
-at what reference price, and later what really happened.
+The point of this is measurement, not profit.  What it measures, though, is not
+what an earlier version of this docstring claimed.  The breakeven cost of the
+configuration below is 47.7bp per side against 6.5bp charged (44 号脚本) -- more
+than seven times the assumed cost -- so fills are not what decides whether it
+works.  The 6.38bp figure that used to be quoted here belongs to the PCA
+residual reversion of 39/40 号脚本, a different strategy on 200 coins turning
+over 441x a year, and quoting it here pointed the effort at the wrong problem.
+
+What actually decides it is selection: these six coins were picked after seeing
+which ones worked, and every parameter below was chosen on their history.  So
+the log's first job is pre-registration -- each signal is committed to git
+before its outcome is known, which is the one thing that makes a later claim
+about this strategy checkable.  Measuring slippage is its second job, and it
+bounds the estimate rather than deciding it.
 
 Three properties this module exists to guarantee:
 

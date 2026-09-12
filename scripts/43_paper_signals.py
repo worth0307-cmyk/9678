@@ -5,10 +5,18 @@
     python scripts/43_paper_signals.py --asof 2026-09-01          # 重放某一天
     python scripts/43_paper_signals.py --reconcile                # 看已实现滑点
 
-It prints orders; it does not send them.  The reason to run it at all is the
-last command: the strategy's breakeven cost out of sample was 6.38bp against
-6.5bp charged, so whether it works is decided by the fills, and the only way to
-learn those is to write down what was intended and compare later.
+It prints orders; it does not send them.  The reason to run it is that these
+six coins were picked after seeing which ones worked, and every parameter was
+chosen on their history -- so the log is a pre-registration: each signal is
+committed to git before its outcome is known, which is what makes any later
+claim about this strategy checkable at all.
+
+The `--reconcile` command measures slippage, which bounds the estimate rather
+than deciding it: 44 号脚本 puts this configuration's breakeven at 47.7bp per
+side against the 6.5bp assumed, so costs would have to come in seven times
+worse to matter.  (An earlier version of this docstring quoted 6.38bp here.
+That belongs to the PCA residual reversion of 39/40 号脚本 -- a different
+strategy, on 200 coins, turning over 441x a year.)
 
 Run it just after 00:00 UTC.  The signal is formed on the daily bar that has
 just closed and is meant to trade at that same instant; this repository measured

@@ -114,7 +114,7 @@ fi
 rm -rf "$OUT"
 run "$PY" scripts/fetch_binance.py \
   --symbols "$SYMBOLS" --intervals "$INTERVALS" \
-  --start "$START" --out "$OUT" --skip-funding \
+  --start "$START" --out "$OUT" --skip-funding --no-hints \
   || die "抓取失败，保留现有数据不动"
 
 # fetch_binance.py 对单个币的失败是「记进 manifest 然后继续」，整体仍然退出 0。

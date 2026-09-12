@@ -160,9 +160,21 @@ def beijing(ts_ms: int) -> str:
 
     The loader subtracts 8 hours on the way back in, so emitting anything else
     here would shift every bar by a fixed offset without tripping a single
-    integrity check.
+    integrity check.  This is the *file* format; for anything a human reads,
+    use `utc()` instead.
     """
     return datetime.fromtimestamp(ts_ms / 1000, BEIJING).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def utc(ts_ms: int) -> str:
+    """Bar open time in UTC -- for printing, never for writing.
+
+    The CSV timestamps are UTC+8 by convention and must stay that way.  But
+    this output is now read in an unattended log whose every other line is
+    UTC-stamped, next to a book that trades at 00:00 UTC.  Printing +8 there
+    made the fetch look like it had pulled bars eight hours into the future.
+    """
+    return datetime.fromtimestamp(ts_ms / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def universe(onboard_before: str) -> tuple[list[dict], dict[str, int]]:
@@ -279,6 +291,10 @@ def main() -> None:
     ap.add_argument("--skip-existing", action="store_true",
                     help="do not re-fetch volume for the 26 already in the repo")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--no-hints", action="store_true",
+                    help="skip the zip/scp instructions -- they describe the "
+                         "two-machine workflow, which does not apply when the "
+                         "fetching box ingests the data itself")
     args = ap.parse_args()
 
     start = ms(args.start)
@@ -381,8 +397,8 @@ def run_pull(args, targets, intervals, start, new_syms=()) -> None:
             write_klines(path, rows)
             row[f"{iv}_bars"] = len(rows)
             row[f"{iv}_first"] = beijing(rows[0][0])
-            print(f"    {iv:<3} {len(rows):>6} bars  {beijing(rows[0][0])} -> "
-                  f"{beijing(rows[-1][0])}", flush=True)
+            print(f"    {iv:<3} {len(rows):>6} bars  {utc(rows[0][0])} -> "
+                  f"{utc(rows[-1][0])} UTC", flush=True)
 
         if not args.skip_funding:
             fpath = args.out / f"{sym}_funding.csv"
@@ -417,6 +433,10 @@ def run_pull(args, targets, intervals, start, new_syms=()) -> None:
     print(f"  {len(list(args.out.glob('*.csv')))} files, {total/1e6:.1f} MB in {args.out}")
     print(f"  manifest: {mpath}")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    # 这段是给「抓取和分析在两台机器上」的老流程用的。VPS 自己 ingest 之后它就是
+    # 错的了 —— 而它每天都会被写进 paper.log，在那里读起来像是还有一步没做。
+    if args.no_hints:
+        return
     print(f"""
 next, pack it (whichever exists on this box):
 

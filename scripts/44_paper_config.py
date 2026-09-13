@@ -22,54 +22,18 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from vibt import data as D, edge as EG, factors as F, paper as PP, xsec as X  # noqa: E402
-
-ANN = 365.0
-
+from vibt import paper as PP  # noqa: E402
 
 def run(p: PP.Params, rebalance_days: int) -> dict:
-    closes = {}
-    for s in p.coins:
-        d = D.load("1d", symbol=s)
-        closes[s] = d["close"]
-    C = pd.DataFrame(closes).sort_index()
-    R = np.log(C).diff().replace([np.inf, -np.inf], np.nan)
-
-    pca = F.rolling_pca(R, p.pca_window, ks=(1,), min_names=p.min_names)
-    feat = pca.zscore.rolling(p.lookback, min_periods=p.lookback).sum()
-    target = X.cross_sectional_weights(feat, mode="rank", gross=p.gross,
-                                       min_names=p.min_names)
-
-    # 只在再平衡日换仓，其余日子持有不动。这一步就是 rebalance_days 的全部作用，
-    # 而它是这个策略能不能活下来的关键变量 —— 每天调仓的话换手是它的三倍。
-    held = pd.DataFrame(0.0, index=target.index, columns=target.columns)
-    cur = pd.Series(0.0, index=target.columns)
-    last: pd.Timestamp | None = None
-    for t in target.index:
-        row = target.loc[t]
-        if row.notna().any() and (last is None or (t - last).days >= rebalance_days):
-            cur = row.fillna(0.0)
-            last = t
-        held.loc[t] = cur
-
-    # 在 t 的收盘形成，在 t+1 的开盘（= 同一时刻）成交，所以吃 t+1 那天的收益
-    fwd = C.pct_change().shift(-1)
-    pnl = (held * fwd).sum(axis=1).dropna()
-    turn = held.diff().abs().sum(axis=1).fillna(0.0).reindex(pnl.index).fillna(0.0)
-
-    years = len(pnl) / ANN
-    gross_ann = float(pnl.mean() * ANN)
-    turn_ann = float(turn.sum() / years)
-    sharpe = float(pnl.mean() / pnl.std() * np.sqrt(ANN)) if pnl.std() > 0 else np.nan
-    be = EG.breakeven_cost(gross_ann, turn_ann)
-    net65 = gross_ann - turn_ann * 6.5e-4
-    return dict(days=len(pnl), years=years, gross_ann=gross_ann, sharpe=sharpe,
-                turn_ann=turn_ann, be_bps=be * 1e4, net65=net65,
-                first=pnl.index[0].date(), last=pnl.index[-1].date())
+    b = PP.backtest(p, rebalance_days)
+    s = PP.stats(b["pnl"], b["turnover"], p.assumed_cost_bps)
+    return dict(days=s["days"], years=s["years"], gross_ann=s["gross_ann"],
+                sharpe=s["sharpe"], turn_ann=s["turn_ann"], be_bps=s["be_bps"],
+                net65=s["net_ann"], first=b["pnl"].index[0].date(),
+                last=b["pnl"].index[-1].date())
 
 
 def main() -> None:

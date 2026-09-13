@@ -164,6 +164,88 @@ def generate(asof: pd.Timestamp | None = None, p: Params | None = None,
                 is_rebalance=bool(due), params=p)
 
 
+# ------------------------------------------------------------------ 回测
+ANN = 365.0
+
+
+def backtest(p: Params | None = None, rebalance_days: int | None = None,
+             coins: tuple[str, ...] | None = None, size: str = "notional") -> dict:
+    """Run this configuration over history and return its daily P&L and turnover.
+
+    Lives here rather than in a script because the thing worth backtesting is
+    the configuration that is actually running, and it is defined in this file.
+    Two scripts reach for it -- 44 号 for the cost economics, 45 号 for how much
+    of the result survives being poked -- and a second copy would be free to
+    drift away from what `generate` does.
+
+    `size` is a diagnostic, not a setting.  The live book is "notional": the
+    signal is vol-normalised but the positions are equal-dollar ranks, so
+    whichever name is most volatile dominates the realised P&L whether or not
+    the ranking was any good.  "risk" divides the same ranks by trailing vol to
+    separate those two effects.  45 号脚本 reports both; `generate` only ever
+    produces the first, and changing that is a strategy change, not a tweak.
+
+    No-lookahead: the feature at `t` uses trailing windows only, and the weights
+    formed on the close of `t` earn `t+1`'s return, which is the same instant the
+    live book is meant to trade at.
+    """
+    p = p or Params()
+    rd = p.rebalance_days if rebalance_days is None else rebalance_days
+    names = tuple(coins) if coins is not None else p.coins
+
+    C = pd.DataFrame({s: D.load("1d", symbol=s)["close"] for s in names}).sort_index()
+    R = np.log(C).diff().replace([np.inf, -np.inf], np.nan)
+    pca = F.rolling_pca(R, p.pca_window, ks=(1,), min_names=p.min_names)
+    feat = pca.zscore.rolling(p.lookback, min_periods=p.lookback).sum()
+    target = X.cross_sectional_weights(feat, mode="rank", gross=p.gross,
+                                       min_names=p.min_names)
+
+    if size == "risk":
+        vol = R.rolling(p.pca_window, min_periods=p.pca_window).std()
+        target = (target / vol).replace([np.inf, -np.inf], np.nan)
+        target = target.div(target.abs().sum(axis=1), axis=0) * p.gross
+    elif size != "notional":
+        raise ValueError(f"size must be 'notional' or 'risk', got {size!r}")
+
+    # 只在再平衡日换仓，其余持有不动 —— rebalance_days 的全部作用就在这里，
+    # 而换手是这个策略的成本账里唯一的变量。
+    held = pd.DataFrame(0.0, index=target.index, columns=target.columns)
+    cur = pd.Series(0.0, index=target.columns)
+    last: pd.Timestamp | None = None
+    for t in target.index:
+        row = target.loc[t]
+        if row.notna().any() and (last is None or (t - last).days >= rd):
+            cur = row.fillna(0.0)
+            last = t
+        held.loc[t] = cur
+
+    fwd = C.pct_change().shift(-1)
+    pnl = (held * fwd).sum(axis=1).dropna()
+    turn = held.diff().abs().sum(axis=1).fillna(0.0).reindex(pnl.index).fillna(0.0)
+    live = held.abs().sum(axis=1).reindex(pnl.index).fillna(0.0) > 0
+    return {"pnl": pnl, "turnover": turn, "live": live, "coins": names,
+            "held": held.reindex(pnl.index), "fwd": fwd.reindex(pnl.index)}
+
+
+def stats(pnl: pd.Series, turn: pd.Series | None = None,
+          cost_bps: float = 6.5) -> dict:
+    """Annualised summary of a P&L series, with the cost arithmetic attached."""
+    pnl = pnl.dropna()
+    if not len(pnl):
+        return {"days": 0, "sharpe": np.nan, "gross_ann": np.nan,
+                "turn_ann": np.nan, "be_bps": np.nan, "net_ann": np.nan}
+    years = len(pnl) / ANN
+    gross_ann = float(pnl.mean() * ANN)
+    sd = float(pnl.std())
+    sharpe = float(pnl.mean() / sd * np.sqrt(ANN)) if sd > 0 else np.nan
+    turn_ann = float(turn.reindex(pnl.index).fillna(0.0).sum() / years) \
+        if turn is not None and years > 0 else np.nan
+    be = gross_ann / turn_ann if turn_ann and turn_ann > 0 else np.nan
+    return {"days": len(pnl), "years": years, "sharpe": sharpe,
+            "gross_ann": gross_ann, "turn_ann": turn_ann, "be_bps": be * 1e4,
+            "net_ann": gross_ann - (turn_ann * cost_bps * 1e-4 if turn_ann else 0.0)}
+
+
 # ------------------------------------------------------------------ 日志
 COLUMNS = ["asof", "generated_at", "execute_at", "symbol", "signal", "target_w",
            "prev_w", "trade_w", "ref_price", "target_notional", "trade_notional",

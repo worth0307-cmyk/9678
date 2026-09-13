@@ -87,6 +87,23 @@ def adx(df: pd.DataFrame, n: int = 14) -> pd.Series:
     return dx.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
 
 
+def cci(df: pd.DataFrame, n: int = 20) -> pd.Series:
+    tp = (df["high"] + df["low"] + df["close"]) / 3.0
+    ma = tp.rolling(n, min_periods=n).mean()
+    md = (tp - ma).abs().rolling(n, min_periods=n).mean()
+    return (tp - ma) / (0.015 * md.replace(0, np.nan))
+
+
+def wavetrend(df: pd.DataFrame, n1: int = 10, n2: int = 11) -> pd.Series:
+    """WaveTrend 振荡器的 wt1 - wt2，Lorentzian Classification 的默认特征之一。"""
+    tp = (df["high"] + df["low"] + df["close"]) / 3.0
+    esa = ema(tp, n1)
+    d = ema((tp - esa).abs(), n1)
+    ci = (tp - esa) / (0.015 * d.replace(0, np.nan))
+    wt1 = ema(ci, n2)
+    return wt1 - sma(wt1, 4)
+
+
 def donchian(df: pd.DataFrame, n: int = 20) -> pd.DataFrame:
     """Channel from bars strictly before t, so a break of it is testable at t."""
     hi = df["high"].shift(1).rolling(n).max()

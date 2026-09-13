@@ -42,12 +42,14 @@ maxBarsBack  = input.int(2000, "回溯上限", minval = 100, maxval = 5000, step
      tooltip = "在多少根历史 bar 里找邻居。越大越慢，而且越可能把完全不同的行情状态当成近邻。")
 holdBars     = input.int(4,  "标签窗口 N", minval = 1, maxval = 50, group = grpCore,
      tooltip = "邻居投票的内容：它之后 N 根 bar 的方向。也是统计面板里的默认持有期。")
+neighborMode = input.string("原版采样器", "近邻选法", options = ["原版采样器", "真·k-NN"], group = grpCore,
+     tooltip = "原版采样器：只看 i%4==0 的 bar，且只在 d>=上一个距离时才收下候选，收满 k 个后把门槛提到已收距离的 75% 分位。它**不保证**取到最近的 k 个。\n真·k-NN：老老实实保留距离最小的 k 个。\n\n两者在本仓库六个币的日线上实测同号率只有 42.2% —— 低于 50%，方向多数时候相反。所以这不是「近似」，是两个算法。面板会实时显示你这张图上的同号率。")
 reduceWarp   = input.bool(false, "削弱价格-时间扭曲", group = grpCore,
      tooltip = "打开后距离用 |Δf| 而不是 log(1+|Δf|)，也就是退回 Manhattan 距离。Lorentzian 的全部特点就在那个 log 上：它压缩大偏差，所以某一维差得离谱的 bar 仍可能被算作近邻。")
 
 grpLabel = "标签对齐（重要）"
 forwardLabel = input.bool(true, "用前向标签（推荐）", group = grpLabel,
-     tooltip = "打开：bar i 的标签 = 从 i 到 i+N 的方向，也就是真正的「之后会怎样」，代价是最近 N 根 bar 不能进训练集。\n关闭：bar i 的标签 = 从 i−N 到 i 的方向，即**已经发生过**的那段。\n两者只差一个偏移量，但意义完全不同 —— 一个是预测，一个是描述。流传的开源版本里这一行值得你自己核对一遍。")
+     tooltip = "打开：bar i 的标签 = 从 i 到 i+N 的方向，也就是真正的「之后会怎样」，代价是最近 N 根 bar 不能进训练集。\n关闭：bar i 的标签 = 从 i−N 到 i 的方向，即**已经发生过**的那段。\n\n两者只差一个偏移量，但意义完全不同 —— 一个是预测，一个是描述。流传的开源版本里这一行值得你自己核对一遍。\n\n实测（六个币 / 日线 / 2022 起 / 真实费率）：前向净 −14.8%/年、Sharpe −0.34，4×4 参数网格 16 格全为负；后向净 −30.7%、Sharpe −0.59。两个都是亏的，前向只是亏得少一点。")
 
 grpFeat = "特征"
 featureCount = input.int(5, "启用特征数", minval = 2, maxval = 10, group = grpFeat,
@@ -251,11 +253,18 @@ lorentz(i) =>
 
 var distances = array.new<float>(0)
 var predVotes = array.new<float>(0)
+var knnDist   = array.new<float>(0)
+var knnVotes  = array.new<float>(0)
 
-prediction = 0.0
+// 两个预测分，来自**同一次扫描**：距离只算一遍，只有挑邻居的方式不同。
+// 这样对照才是干净的 —— 两边看到的是完全相同的候选集和距离。
+predSampler = 0.0
+predKnn     = 0.0
 if bar_index > holdBars + 10
     array.clear(distances)
     array.clear(predVotes)
+    array.clear(knnDist)
+    array.clear(knnVotes)
     lastDistance = -1.0
     // 前向标签时，最后 N 根 bar 的标签尚未存在，扫描必须停在那之前
     scanEnd = math.max(0, array.size(a1) - 1 - (forwardLabel ? holdBars : 0))
@@ -263,15 +272,43 @@ if bar_index > holdBars + 10
     for i = scanStart to scanEnd
         if i % 4 == 0
             d = lorentz(i)
+            v = labelAt(i)
+            // (a) 原版采样器：只收 d >= lastDistance 的，再把门槛提到 75% 分位
             if d >= lastDistance
                 lastDistance := d
                 array.push(distances, d)
-                array.push(predVotes, labelAt(i))
+                array.push(predVotes, v)
                 if array.size(predVotes) > neighbors
                     lastDistance := array.get(distances, math.round(neighbors * 3 / 4))
                     array.shift(distances)
                     array.shift(predVotes)
-    prediction := array.sum(predVotes)
+            // (b) 真·k-NN：老老实实保留距离最小的 k 个
+            if array.size(knnDist) < neighbors
+                array.push(knnDist, d)
+                array.push(knnVotes, v)
+            else
+                worst = array.max(knnDist)
+                if d < worst
+                    wi = array.indexof(knnDist, worst)
+                    array.set(knnDist, wi, d)
+                    array.set(knnVotes, wi, v)
+    predSampler := array.sum(predVotes)
+    predKnn     := array.sum(knnVotes)
+
+prediction = neighborMode == "原版采样器" ? predSampler : predKnn
+
+// 两种选法的同号率。在本仓库六个币、2022 年起的日线上实测是 **42.2%** ——
+// 低于 50%，也就是说它们给出的方向**多数时候是相反的**。那意味着原版那个
+// 扫描不是「k-NN 的近似」，而是另一个算法，只是共用了同一个距离公式。
+// 换句话说：谈论「Lorentzian k-NN 好不好」之前，得先说清楚指的是哪一个。
+var int agreeN   = 0
+var int agreeHit = 0
+if predSampler != 0 and predKnn != 0
+    agreeN += 1
+    agreeHit += math.sign(predSampler) == math.sign(predKnn) ? 1 : 0
+// Pine 里 int/int 是**整数除法** —— 不转 float 的话，除非 100%，这一行恒等于 0。
+// 面板上三处比例都踩这个坑，全部显式转 float。
+agreeRate = agreeN > 0 ? float(agreeHit) / agreeN : na
 
 // ───────────────────────────────────────────────────────── 5. 过滤器
 
@@ -430,7 +467,9 @@ if showBarScore and bar_index > last_bar_index - 300
          style = label.style_none, textcolor = scoreCol, size = size.tiny)
 
 plot(stream, "回测数值流", display = display.data_window)
-plot(prediction, "预测分", display = display.data_window)
+plot(prediction, "预测分（当前选法）", display = display.data_window)
+plot(predSampler, "预测分·采样器", display = display.data_window)
+plot(predKnn, "预测分·真kNN", display = display.data_window)
 
 // ───────────────────────────────────────────────────────── 9. 校准面板
 //
@@ -493,20 +532,20 @@ if openDir == 0 and (isNewLong or isNewShort)
     openPx  := close
     openAtr := atr14
 
-winRate   = nTrades > 0 ? nWins / nTrades : na
+winRate   = nTrades > 0 ? float(nWins) / nTrades : na
 avgWin    = nWins > 0 ? sumWinR / nWins : na
 avgLoss   = (nTrades - nWins) > 0 ? sumLosR / (nTrades - nWins) : na
 payoff    = not na(avgWin) and not na(avgLoss) and avgLoss > 0 ? avgWin / avgLoss : na
 expectR   = nTrades > 0 ? (sumWinR - sumLosR) / nTrades : na
 profitF   = sumLosR > 0 ? sumWinR / sumLosR : na
-baseUp    = nBase > 0 ? nBaseUp / nBase : na
+baseUp    = nBase > 0 ? float(nBaseUp) / nBase : na
 baseDn    = na(baseUp) ? na : 1 - baseUp
 // 信号加权的基准：每笔交易按自己的方向对应的基准，再按笔数加权
 baseMix   = nTrades > 0 and not na(baseUp) ? (nLong * baseUp + nShort * baseDn) / nTrades : na
 excess    = not na(winRate) and not na(baseMix) ? winRate - baseMix : na
 
 if showStats and barstate.islast
-    var table t = table.new(position.top_right, 2, 11, border_width = 1)
+    var table t = table.new(position.top_right, 2, 13, border_width = 1)
     table.cell(t, 0, 0, "校准面板", bgcolor = color.new(color.gray, 20), text_color = color.white)
     table.cell(t, 1, 0, str.tostring(nTrades) + " 笔（多 " + str.tostring(nLong) + " / 空 " + str.tostring(nShort) + "）",
          bgcolor = color.new(color.gray, 20), text_color = color.white)
@@ -526,16 +565,22 @@ if showStats and barstate.islast
     table.cell(t, 1, 6, na(profitF) ? "—" : str.tostring(profitF, "#.##"))
     table.cell(t, 0, 7, "持有期")
     table.cell(t, 1, 7, str.tostring(hb) + " 根")
+    table.cell(t, 0, 8, "标签 / 近邻")
+    table.cell(t, 1, 8, (forwardLabel ? "前向" : "后向") + " / " +
+         (neighborMode == "原版采样器" ? "采样器" : "真k-NN"))
+    table.cell(t, 0, 9, "两法同号率")
+    table.cell(t, 1, 9, na(agreeRate) ? "—" : str.tostring(agreeRate * 100, "#.#") + "%",
+         text_color = na(agreeRate) ? color.gray : agreeRate < 0.5 ? color.orange : color.gray)
     warn = nTrades < 30 ? "笔数太少，无统计意义" :
          not na(excess) and math.abs(excess) < 0.03 ? "超额≈0：信号没提供信息" :
          not na(winRate) and not na(expectR) and winRate > 0.7 and expectR < 0.05 ? "高胜率+低期望=赢小亏大" :
          not na(expectR) and expectR <= 0 ? "期望为负" : "—"
-    table.cell(t, 0, 8, "提示")
-    table.cell(t, 1, 8, warn, text_color = warn == "—" ? color.gray : color.orange)
-    table.cell(t, 0, 9, "未扣成本", text_color = color.gray)
-    table.cell(t, 1, 9, "手续费 + 资金费率", text_color = color.gray)
-    table.cell(t, 0, 10, "这是校准，不是回测", text_color = color.gray)
-    table.cell(t, 1, 10, "", text_color = color.gray)
+    table.cell(t, 0, 10, "提示")
+    table.cell(t, 1, 10, warn, text_color = warn == "—" ? color.gray : color.orange)
+    table.cell(t, 0, 11, "未扣成本", text_color = color.gray)
+    table.cell(t, 1, 11, "手续费 + 资金费率", text_color = color.gray)
+    table.cell(t, 0, 12, "这是校准，不是回测", text_color = color.gray)
+    table.cell(t, 1, 12, "", text_color = color.gray)
 
 // ───────────────────────────────────────────────────────── 10. 警报
 

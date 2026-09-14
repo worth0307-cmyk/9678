@@ -53,6 +53,20 @@ def pair(sym: str, tf: str) -> pd.DataFrame:
     return pd.concat([p, s], axis=1).dropna()
 
 
+def leg_pnl(df: pd.DataFrame) -> pd.Series:
+    """两条腿的逐日损益，占**当期**名义的比例。
+
+    第一版写的是 (s_t/s_0 − p_t/p_0) 再差分。那等价于「期初建一次仓、之后
+    再不调整」，而且以**期初**名义为分母 —— 于是价格跌到期初的 8% 之后，
+    真实的 25% 基差冲击被缩成 2%。SOL 在 FTX 那天的损益因此被报成 −18.47%，
+    真实值是 −42% 量级。
+
+    真实持仓是等名义、持续盯市的，所以逐日损益就是两条腿的**日收益之差**：
+    做空永续，永续涨得比现货多就亏。
+    """
+    return (df["spot"].pct_change() - df["perp"].pct_change()).fillna(0.0)
+
+
 def basis_bp(df: pd.DataFrame) -> pd.Series:
     return (df["perp"] / df["spot"] - 1.0) * 1e4
 
@@ -125,12 +139,7 @@ def main() -> None:
         df, b = store[s]
         df = df.resample("D").last().dropna()
         fu = funding_on(df.index, s, "1d")
-        legs = (df["spot"] / df["spot"].iloc[0]) - (df["perp"] / df["perp"].iloc[0])
-        # 注意：逐日差分再求和是**望远镜式相消**的，合计只等于
-        # (期末基差 − 期初基差)/年数。基差是平稳的，所以「基差年化」必然接近 0 ——
-        # 那说明基差不产生长期损益，但它**完全没有度量路径风险**。
-        # 路径在回撤和单日最差那两列里，以及下面的 E 节。
-        basis_pnl = legs.diff().fillna(0.0)
+        basis_pnl = leg_pnl(df)
         total = basis_pnl + fu
         yrs = len(total) / 365.0
         eq = (1 + total).cumprod()
@@ -183,8 +192,7 @@ def main() -> None:
     df, _ = store["SOLUSDT"]
     d = df.resample("D").last().dropna()
     fu = funding_on(d.index, "SOLUSDT", "1d")
-    legs = (d["spot"] / d["spot"].iloc[0]) - (d["perp"] / d["perp"].iloc[0])
-    bp = legs.diff().fillna(0.0)
+    bp = leg_pnl(d)
     bb = basis_bp(d)
     win = slice("2022-11-05", "2022-11-16")
     out = pd.DataFrame({"现货": d["spot"][win].round(2), "永续": d["perp"][win].round(2),

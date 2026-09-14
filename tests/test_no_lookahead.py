@@ -1177,3 +1177,32 @@ def test_klines_pagination_survives_a_server_side_cap():
     fb.MARKET["limit"] = 1500         # 故意请求得比服务器上限多
     rows = fb.klines("BTCUSDT", "1h", 0)
     assert len(rows) == total, f"分页提前终止：只拿到 {len(rows)}/{total} 根"
+
+
+def test_basis_pnl_is_measured_against_current_notional():
+    """基差冲击的损益不能被「离期初价格多远」缩放.
+
+    做空永续 + 持有现货，是等名义、持续盯市的。第一版用
+    (s_t/s_0 − p_t/p_0) 再差分 —— 那等价于期初建一次仓再不调整，并且以
+    **期初**名义为分母。于是价格跌到期初的 10% 之后，一次真实的 20% 基差
+    冲击只被记成 2%。SOL 在 FTX 当天因此被报成 −18%，真实量级是 −42%。
+
+    这里把价格造到期初的十分之一，再打一次 +20% 的基差冲击。
+    """
+    import importlib.util
+    from pathlib import Path as _P
+    spec = importlib.util.spec_from_file_location(
+        "basis", _P(__file__).resolve().parent.parent / "scripts" / "55_basis.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    idx = pd.date_range("2024-01-01", periods=4, freq="D")
+    df = pd.DataFrame({"spot": [100.0, 100.0, 10.0, 10.0],
+                       "perp": [100.0, 100.0, 10.0, 12.0]}, index=idx)
+    pnl = m.leg_pnl(df)
+
+    # 第 4 天：现货不动，永续 +20% —— 空头腿亏 20%，和价格水位无关
+    assert pnl.iloc[3] == pytest.approx(-0.20, abs=1e-12), \
+        f"基差冲击被价格水位缩放了：得到 {pnl.iloc[3]:.4f}，应为 -0.20"
+    # 第 3 天两条腿同步暴跌 90%，对冲组合应当毫发无伤
+    assert pnl.iloc[2] == pytest.approx(0.0, abs=1e-12)

@@ -1152,3 +1152,28 @@ def test_universe_handles_spot_exchange_info():
     elig, listed = fb.universe("2024-07-01")
     assert elig == []                       # 现货不走资格筛选
     assert set(listed) == {"BTCUSDT", "ETHUSDT"}   # 非 TRADING 的被剔除
+
+
+def test_klines_pagination_survives_a_server_side_cap():
+    """服务器返回的条数少于请求量时，分页不能提前终止.
+
+    现货的 limit 上限是 1000，永续是 1500。第一版用「这批比 1500 少就是到头了」
+    判断终止，于是现货每批返回 1000 就 break —— 四年数据被截成 1000 根，
+    而且截断处**没有缺口、没有坏 OHLC**，完整性检查全过。
+    静默截断比报错危险得多，所以这条单独锁住。
+    """
+    fb = _load_fetcher()
+    total = 2500                      # 三批多一点
+    bars = [[i * 60_000, "1", "1", "1", "1", "0", i * 60_000 + 59_999]
+            for i in range(total)]
+
+    def fake_get(path, params, tries=6):
+        cap = 1000                    # 服务器的真实上限，低于请求量
+        start = params["startTime"]
+        sel = [b for b in bars if b[0] >= start][:cap]
+        return sel
+
+    fb.get = fake_get
+    fb.MARKET["limit"] = 1500         # 故意请求得比服务器上限多
+    rows = fb.klines("BTCUSDT", "1h", 0)
+    assert len(rows) == total, f"分页提前终止：只拿到 {len(rows)}/{total} 根"

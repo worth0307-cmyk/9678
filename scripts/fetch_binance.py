@@ -71,7 +71,12 @@ SPOT_BASE = "https://api.binance.com"      # 现货
 
 # --spot 把这两个切到现货端点。做成模块级变量而不是到处传参，是因为 get() 被
 # 十几处调用，改签名会牵动整个文件；而一次运行只可能是其中一种市场。
-MARKET = {"base": BASE, "klines": "/fapi/v1/klines", "info": "/fapi/v1/exchangeInfo"}
+# limit 也是这一组的一部分：永续每批最多 1500 根，**现货只有 1000**。
+# 分页的终止条件是「这一批比上限少 -> 到头了」，所以上限写死成 1500 的话，
+# 现货每批返回 1000，1000 < 1500，第一批之后就停 —— 数据被静默截断，
+# 而且截断处看起来像一个完整、无缺口的文件。
+MARKET = {"base": BASE, "klines": "/fapi/v1/klines",
+          "info": "/fapi/v1/exchangeInfo", "limit": 1500}
 UA = "Mozilla/5.0 (compatible; kline-fetch/1.0)"
 
 # The 26 already in data/.  Listed explicitly so the script needs no repo access.
@@ -221,8 +226,9 @@ def universe(onboard_before: str) -> tuple[list[dict], dict[str, int]]:
 def klines(symbol: str, interval: str, start: int) -> list[list]:
     rows, cursor, seen = [], start, set()
     while True:
+        lim = MARKET["limit"]
         batch = get(MARKET["klines"], {"symbol": symbol, "interval": interval,
-                                       "startTime": cursor, "limit": 1500})
+                                       "startTime": cursor, "limit": lim})
         if not batch:
             break
         fresh = [b for b in batch if b[0] not in seen]
@@ -231,8 +237,11 @@ def klines(symbol: str, interval: str, start: int) -> list[list]:
         for b in fresh:
             seen.add(b[0])
         rows.extend(fresh)
-        if len(batch) < 1500:
-            break
+        # 不用「这批比上限少 -> 到头了」来终止。那个判断依赖服务器**恰好**
+        # 按请求的数量返回，而现货的上限是 1000、永续是 1500 —— 一旦请求量
+        # 超过服务器上限，第一批就会被当成最后一批，数据静默截断成一个
+        # 看起来完整、无缺口的文件。只靠「没有新数据了」终止，代价是每个
+        # symbol×interval 多发一次请求，换来对任何服务器上限都免疫。
         cursor = batch[-1][0] + 1
     rows.sort(key=lambda b: b[0])
     # The final bar is still forming.  Keeping it would write a partial candle to
@@ -314,7 +323,7 @@ def main() -> None:
 
     if args.spot:
         MARKET.update(base=SPOT_BASE, klines="/api/v3/klines",
-                      info="/api/v3/exchangeInfo")
+                      info="/api/v3/exchangeInfo", limit=1000)
         args.skip_funding = True          # 现货没有资金费率
         if not args.symbols:
             ap.error("--spot 必须配 --symbols：现货有几千个交易对，"
@@ -333,7 +342,8 @@ def main() -> None:
         onboard = listed          # every listed symbol, not the eligible slice
         print(f"\n  explicit symbol list: {len(want)}  {' '.join(want)}")
         if missing:
-            print(f"  WARNING: not currently listed as USDT-M perpetuals: {missing}")
+            venue = "现货" if MARKET["base"] == SPOT_BASE else "USDT-M 永续"
+            print(f"  WARNING: 这些在币安{venue}上没有: {missing}")
         # A symbol listed after --start has no data before it exists.  Saying so
         # here beats handing back a short file that looks like a fetch failure.
         late = {s: onboard[s] for s in want

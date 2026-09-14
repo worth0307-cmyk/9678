@@ -10,9 +10,13 @@
 价格涨跌在两条腿之间抵消，剩下两样东西：
 
     资金费率   收（费率为正时）
-    基差变动   (永续 − 现货) 的价差自己会动，而你对它是**空头**
+    基差变动   (永续 − 现货) 的价差自己会动
 
-基差走阔时空头亏钱。所以这笔交易的完整损益是：
+方向要说准：这个组合**做空永续**，所以永续相对现货**变贵（基差上升）时亏钱**，
+变便宜（基差下降）时赚钱。因此在基差偏高时建仓有利，偏低时建仓不利 ——
+后者意味着它还要往上均值回复，那段回复就是你的成本。
+
+完整损益是：
 
     P&L = 现货腿涨跌 − 永续腿涨跌 + 累计资金费率
         = (s_t/s_0 − 1) − (p_t/p_0 − 1) + Σ funding
@@ -122,7 +126,11 @@ def main() -> None:
         df = df.resample("D").last().dropna()
         fu = funding_on(df.index, s, "1d")
         legs = (df["spot"] / df["spot"].iloc[0]) - (df["perp"] / df["perp"].iloc[0])
-        basis_pnl = legs.diff().fillna(0.0)          # 基差变动带来的逐日损益
+        # 注意：逐日差分再求和是**望远镜式相消**的，合计只等于
+        # (期末基差 − 期初基差)/年数。基差是平稳的，所以「基差年化」必然接近 0 ——
+        # 那说明基差不产生长期损益，但它**完全没有度量路径风险**。
+        # 路径在回撤和单日最差那两列里，以及下面的 E 节。
+        basis_pnl = legs.diff().fillna(0.0)
         total = basis_pnl + fu
         yrs = len(total) / 365.0
         eq = (1 + total).cumprod()
@@ -167,6 +175,28 @@ def main() -> None:
     print("""
   基差为正时建仓对空方**有利**（卖在溢价上）。所以真正该等的不是价格，
   是基差 —— 而这和「等回调」不同：基差是可观测的当期状态，不是对未来的预测。""")
+
+
+    print("\n" + "-" * 120)
+    print("E  把 SOL 的 FTX 那几天摊开 —— 尾部就在这里")
+    print("-" * 120 + "\n")
+    df, _ = store["SOLUSDT"]
+    d = df.resample("D").last().dropna()
+    fu = funding_on(d.index, "SOLUSDT", "1d")
+    legs = (d["spot"] / d["spot"].iloc[0]) - (d["perp"] / d["perp"].iloc[0])
+    bp = legs.diff().fillna(0.0)
+    bb = basis_bp(d)
+    win = slice("2022-11-05", "2022-11-16")
+    out = pd.DataFrame({"现货": d["spot"][win].round(2), "永续": d["perp"][win].round(2),
+                        "基差bp": bb[win].round(0), "基差损益": bp[win],
+                        "资金费率": fu[win], "合计": (bp + fu)[win]})
+    for c in ("基差损益", "资金费率", "合计"):
+        out[c] = out[c].map("{:+.2%}".format)
+    print(out.to_string())
+    print("""
+  这一段是整笔交易全部风险的来源。看三件事：
+    基差在 11-09 崩到什么程度、第二天回升多少、以及基差损益和资金费率
+    是**互相抵消**还是**同向叠加**。""")
 
 
 if __name__ == "__main__":

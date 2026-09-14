@@ -66,7 +66,12 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-BASE = "https://fapi.binance.com"
+BASE = "https://fapi.binance.com"          # U 本位永续
+SPOT_BASE = "https://api.binance.com"      # 现货
+
+# --spot 把这两个切到现货端点。做成模块级变量而不是到处传参，是因为 get() 被
+# 十几处调用，改签名会牵动整个文件；而一次运行只可能是其中一种市场。
+MARKET = {"base": BASE, "klines": "/fapi/v1/klines", "info": "/fapi/v1/exchangeInfo"}
 UA = "Mozilla/5.0 (compatible; kline-fetch/1.0)"
 
 # The 26 already in data/.  Listed explicitly so the script needs no repo access.
@@ -120,7 +125,7 @@ LIMIT = Limiter()
 
 
 def get(path: str, params: dict, tries: int = 6):
-    url = f"{BASE}{path}?{urllib.parse.urlencode(params)}"
+    url = f"{MARKET['base']}{path}?{urllib.parse.urlencode(params)}"
     for attempt in range(tries):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA})
@@ -190,7 +195,14 @@ def universe(onboard_before: str) -> tuple[list[dict], dict[str, int]]:
     that slice, so any per-symbol note about its true start silently skips
     exactly the symbols that need one.
     """
-    info = get("/fapi/v1/exchangeInfo", {})
+    info = get(MARKET["info"], {})
+    # 现货的 exchangeInfo 没有 contractType，也没有 onboardDate —— 下面按
+    # 永续字段过滤会得到空集。现货模式只允许配 --symbols（几千个交易对里
+    # 我们只要对应的那几个），所以这里直接把「所有在交易的」返回就够了。
+    if MARKET["base"] == SPOT_BASE:
+        listed = {x["symbol"]: 0 for x in info["symbols"]
+                  if x.get("status") == "TRADING"}
+        return [], listed
     cutoff = ms(onboard_before)
     listed = {s["symbol"]: int(s.get("onboardDate", 0)) for s in info["symbols"]
               if s.get("status") == "TRADING" and s.get("contractType") == "PERPETUAL"}
@@ -209,8 +221,8 @@ def universe(onboard_before: str) -> tuple[list[dict], dict[str, int]]:
 def klines(symbol: str, interval: str, start: int) -> list[list]:
     rows, cursor, seen = [], start, set()
     while True:
-        batch = get("/fapi/v1/klines", {"symbol": symbol, "interval": interval,
-                                        "startTime": cursor, "limit": 1500})
+        batch = get(MARKET["klines"], {"symbol": symbol, "interval": interval,
+                                       "startTime": cursor, "limit": 1500})
         if not batch:
             break
         fresh = [b for b in batch if b[0] not in seen]
@@ -291,11 +303,23 @@ def main() -> None:
     ap.add_argument("--skip-existing", action="store_true",
                     help="do not re-fetch volume for the 26 already in the repo")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--spot", action="store_true",
+                    help="抓现货（api.binance.com）而不是 U 本位永续。"
+                         "现货没有资金费率，会自动跳过。")
     ap.add_argument("--no-hints", action="store_true",
                     help="skip the zip/scp instructions -- they describe the "
                          "two-machine workflow, which does not apply when the "
                          "fetching box ingests the data itself")
     args = ap.parse_args()
+
+    if args.spot:
+        MARKET.update(base=SPOT_BASE, klines="/api/v3/klines",
+                      info="/api/v3/exchangeInfo")
+        args.skip_funding = True          # 现货没有资金费率
+        if not args.symbols:
+            ap.error("--spot 必须配 --symbols：现货有几千个交易对，"
+                     "而这里要的是和永续一一对应的那几个")
+        print("=== 现货模式：api.binance.com，跳过资金费率")
 
     start = ms(args.start)
     intervals = [s.strip() for s in args.intervals.split(",") if s.strip()]

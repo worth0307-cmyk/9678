@@ -1106,3 +1106,49 @@ def test_paper_reconcile_signs_slippage_against_the_traded_side():
     assert (r["slippage_bps"] > 0).all(), "adverse fills must not cancel out"
     assert r["slippage_bps"].iloc[0] == pytest.approx(10.0, rel=1e-6)
     assert r["slippage_bps"].iloc[1] == pytest.approx(10.0, rel=1e-6)
+
+
+def _load_fetcher():
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).resolve().parent.parent / "scripts" / "fetch_binance.py"
+    spec = importlib.util.spec_from_file_location("fetch_binance", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_spot_mode_switches_every_endpoint_together():
+    """--spot 必须把 base、klines、exchangeInfo 三个一起切换.
+
+    只切 base 会去 api.binance.com 请求 /fapi/v1/klines —— 404，而且错得很晚。
+    永续和现货的 K 线路径不同，这三个是一组。
+    """
+    fb = _load_fetcher()
+    assert fb.MARKET["base"] == fb.BASE
+    assert fb.MARKET["klines"].startswith("/fapi/")
+    fb.MARKET.update(base=fb.SPOT_BASE, klines="/api/v3/klines",
+                     info="/api/v3/exchangeInfo")
+    assert fb.MARKET["base"] == "https://api.binance.com"
+    assert "/fapi/" not in fb.MARKET["klines"]
+    assert "/fapi/" not in fb.MARKET["info"]
+
+
+def test_universe_handles_spot_exchange_info():
+    """现货的 exchangeInfo 没有 contractType / onboardDate.
+
+    照永续的字段去过滤会得到空集，而空集在上层表现为「这些币没上市」——
+    一个看起来像数据问题、实际是代码问题的失败。
+    """
+    fb = _load_fetcher()
+    fake = {"symbols": [
+        {"symbol": "BTCUSDT", "status": "TRADING", "quoteAsset": "USDT"},
+        {"symbol": "ETHUSDT", "status": "TRADING", "quoteAsset": "USDT"},
+        {"symbol": "DEADUSDT", "status": "BREAK", "quoteAsset": "USDT"},
+    ]}
+    fb.get = lambda path, params, tries=6: fake
+    fb.MARKET.update(base=fb.SPOT_BASE, klines="/api/v3/klines",
+                     info="/api/v3/exchangeInfo")
+    elig, listed = fb.universe("2024-07-01")
+    assert elig == []                       # 现货不走资格筛选
+    assert set(listed) == {"BTCUSDT", "ETHUSDT"}   # 非 TRADING 的被剔除

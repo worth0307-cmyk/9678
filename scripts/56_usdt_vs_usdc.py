@@ -173,15 +173,24 @@ def main() -> None:
   而它会往上均值回复 —— 那段回复由你付。""")
 
     print("\n" + "-" * 122)
-    print("C  逐年")
+    print("C  逐年 —— 这一段才是决策的依据")
     print("-" * 122 + "\n")
+    # 一律年化。不年化的话 256 天的 2026 和 365 天的 2025 没法并排读，
+    # 而这张表唯一的用途就是看**趋势**。
+    print(f"  {'':10s} {'年化收益':>9} {'其中资金费率':>13} {'其中基差':>9} {'天数':>6}")
     for s, x in legs.items():
         print(f"  {s}")
-        for y, seg in x.reindex(common)["total"].groupby(common.year):
-            print(f"    {y}  {float((1 + seg).prod() - 1):+7.2%}   "
-                  f"资金费率 {float(x.reindex(common)['funding'][seg.index].sum()):+7.2%}   "
-                  f"基差 {float(x.reindex(common)['basis_pnl'][seg.index].fillna(0).sum()):+7.2%}   "
-                  f"{len(seg)} 天")
+        xs = x.reindex(common)
+        for y, seg in xs["total"].groupby(common.year):
+            n = len(seg)
+            ann = (1 + float((1 + seg).prod() - 1)) ** (365.0 / n) - 1
+            fu = float(xs["funding"][seg.index].sum()) * 365.0 / n
+            ba = float(xs["basis_pnl"][seg.index].fillna(0).sum()) * 365.0 / n
+            print(f"  {y:>10}  {ann:+9.2%} {fu:+13.2%} {ba:+9.2%} {n:>6}")
+    print("""
+  这不是波动，是**趋势**：更多资本涌进来收割，溢价就被压平。
+  平均值（共同窗口 +6.9%）是被 2024 年拉起来的，**当下的运行水平才是
+  你要面对的那个数**。""")
 
 
 if __name__ == "__main__":

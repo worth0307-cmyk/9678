@@ -250,8 +250,18 @@ if array.size(pats) > 0
                     box.set_bgcolor(p.bx, color.new(deadCol, math.min(99, zOpa + 5)))
                     box.set_border_color(p.bx, color.new(deadCol, 55))
                     line.set_color(p.ln, color.new(deadCol, 40))
+                    // 四个点的标签也一起变灰。不变的话会出现「绿 H/L/LL 配灰 QM」
+                    // 这种自相矛盾的画面 —— 形态已经死了，但点还在按方向着色。
                     if not na(p.lbQ)
                         label.set_color(p.lbQ, color.new(deadCol, 40))
+                    if not na(p.l1)
+                        label.set_color(p.l1, color.new(deadCol, 55))
+                    if not na(p.l2)
+                        label.set_color(p.l2, color.new(deadCol, 55))
+                    if not na(p.l3)
+                        label.set_color(p.l3, color.new(deadCol, 55))
+                    if not na(p.l4)
+                        label.set_color(p.l4, color.new(deadCol, 55))
             else
                 box.set_right(p.bx, bar_index + 1)
                 line.set_x2(p.ln, bar_index + 1)
@@ -269,6 +279,12 @@ if array.size(pats) > 0
                     if trg
                         p.triggered := true
                         aTrig       := true
+                        // 触发状态本来只发警报、图上看不出来。加粗边框 + 标签打勾，
+                        // 这样「还没被碰过」「碰过但没反应」「已经触发」三种状态
+                        // 在图上是分得开的。
+                        box.set_border_width(p.bx, 2)
+                        if not na(p.lbQ)
+                            label.set_text(p.lbQ, "QM ✓")
 
 // ───────────────────────────────────────────────────────── 6. 警报
 

@@ -49,6 +49,12 @@ fibN  = input.float(1.618, "加分比例 N", minval = 0.5, step = 0.1, group = g
 maxPat = input.int(1, "每个级别保留最近几组", minval = 1, maxval = 8, group = gR,
      tooltip = "三个级别同时开、每级留 2 组，图上就是 30 条浪线 + 3 条推演线互相压。" +
                "默认 1 组：想看历史再往上加。")
+maxSpan = input.int(300, "一组浪最大跨度（根，0 = 不限）", minval = 0, group = gR,
+     tooltip = "**这条是为了让线跟着价格走。** 一组浪的连线是两个枢轴之间的直线；" +
+               "枢轴隔了几百根的时候，两端都在屏幕外，中间那条直线就横穿图表，" +
+               "落在和当地K线毫无关系的价位上 —— 看起来就像「线没跟着价格变化」。\n\n" +
+               "实测：SOL 日线 ATR×8 唯一一组浪跨 752 根。默认 300 会把它筛掉，" +
+               "所以级别 C 在日线上经常是 0 组 —— 那不是坏了，是日线上 ATR×8 的浪本来就以年计。")
 
 gP = "③ 推演"
 showProj = input.bool(true, "画推演", group = gP,
@@ -109,6 +115,8 @@ type Wave
     line  proj
     line  ray
     label projLb
+    int   tgtBi      // 推演终点所在的 bar；走过它推演就过期了
+    bool  expired
 
 type Lv
     string      name
@@ -253,7 +261,15 @@ method detect(Lv L) =>
         bool r5 = not need5 or (bull ? p5.price > p3.price : p5.price < p3.price)
         // 注：r4 + 交替性已经蕴含 P3 越过 P1，所以不用再单列一条
 
-        if (bull or bear) and r2 and r3 and r4 and r5
+        // rBi：六个点必须落在**六根不同的**K线上。一根大阴/大阳线可以同时
+        // 贡献摆动高点和摆动低点，那会让某一浪变成零长度的垂直线段 ——
+        // 实测 SOL 日线 ATR×2 的两组命中**全部**是这种。
+        bool rBi = p1.bi > p0.bi and p2.bi > p1.bi and p3.bi > p2.bi
+                     and p4.bi > p3.bi and p5.bi > p4.bi
+        // rSpan：跨度上限，见输入里的说明
+        bool rSpan = maxSpan == 0 or (p5.bi - p0.bi) <= maxSpan
+
+        if (bull or bear) and r2 and r3 and r4 and r5 and rBi and rSpan
             found := true
             L.hits := L.hits + 1
             bool star = fibOn and l3 >= fibN * l1
@@ -264,7 +280,8 @@ method detect(Lv L) =>
             if projLast and array.size(L.ws) > 0
                 delProj(array.get(L.ws, array.size(L.ws) - 1))
 
-            Wave w = Wave.new(segs = array.new<line>(), lbs = array.new<label>())
+            Wave w = Wave.new(segs = array.new<line>(), lbs = array.new<label>(),
+                 expired = false)
 
             // P0→P5 连线，浪3 达标时加粗
             array.push(w.segs, line.new(p0.bi, p0.price, p1.bi, p1.price,
@@ -293,6 +310,7 @@ method detect(Lv L) =>
                 int tgtBi = math.min(p5.bi + dbars, bar_index + 450)
                 float full = math.abs(p5.price - p0.price)
                 float tgt  = bull ? p5.price - full * projRetr : p5.price + full * projRetr
+                w.tgtBi := tgtBi
 
                 // 斜线：从 P5 指向目标，用**自己的颜色**（和三个级别都不同），
                 // 否则它和浪线一个色一个形状，在图上根本认不出来
@@ -316,6 +334,17 @@ method detect(Lv L) =>
             if array.size(L.ws) > maxPat
                 delWave(array.shift(L.ws))
     found
+
+// 推演过期清理。推演在 P5 刚确认时指向未来，但它会一直挂在图上 ——
+// 等价格走过 tgtBi 之后，那条斜线就变成一条画在旧K线上、对过去做的预测。
+// 实测 SOL 日线：三个级别最新的推演分别已经过期 1010 / 514 / 222 根。
+method sweep(Lv L) =>
+    if array.size(L.ws) > 0
+        for i = 0 to array.size(L.ws) - 1
+            Wave w = array.get(L.ws, i)
+            if not w.expired and not na(w.tgtBi) and bar_index > w.tgtBi
+                w.expired := true
+                delProj(w)
 
 // ───────────────────────────────────────────────────────── 5. 每根维护
 
@@ -343,6 +372,11 @@ if LB.on and atrOk and LB.zigzag(atrV * LB.mult)
     hitB := LB.detect()
 if LC.on and atrOk and LC.zigzag(atrV * LC.mult)
     hitC := LC.detect()
+
+// 过期清理每根都要跑，不能挂在「本根确认了新枢轴」上
+LA.sweep()
+LB.sweep()
+LC.sweep()
 
 if showTbl and barstate.islast
     var table tb = table.new(position.bottom_right, 2, 5,

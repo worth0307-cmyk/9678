@@ -44,6 +44,14 @@ gR = "② 校验规则"
 need5 = input.bool(true, "浪5 必须超越浪3 端点", group = gR,
      tooltip = "关掉 = 允许衰竭浪（truncated fifth）。这是你三条硬规则之外我加的第四条，" +
                "所以做成开关：衰竭浪在艾略特里合法但少见，默认打开能少掉很多噪声数浪。")
+ovTol = input.float(0.0, "浪4 允许重叠浪1 的比例", minval = 0.0, maxval = 0.5, step = 0.01, group = gR,
+     tooltip = "「浪4 不进浪1 价格区间」是艾略特最硬的一条，默认 0 = 一点都不让。\n\n" +
+               "但**对角线形态（leading / ending diagonal）在艾略特里本来就允许重叠**，" +
+               "所以给一个容差，单位是浪1 长度的比例。\n\n" +
+               "实测 BTC 日线 2026-09：级别B 的浪4 只侵入了浪1 的 4.9% 就被判出局，" +
+               "而级别A 侵入 33%、级别C 侵入 23.6%。把这个值设到 0.06，" +
+               "级别B 那一组 1-5 就会成立并画出推演；A 和 C 仍然出局。\n\n" +
+               "**调这个值是在放宽定义，不是在改进检测。** 放得越宽，命中越多，含义越少。")
 fibOn = input.bool(true,  "浪3 ≥ N×浪1 时加粗标 ★（仅加分）", group = gR)
 fibN  = input.float(1.618, "加分比例 N", minval = 0.5, step = 0.1, group = gR)
 maxPat = input.int(1, "每个级别保留最近几组", minval = 1, maxval = 8, group = gR,
@@ -262,7 +270,9 @@ method detect(Lv L) =>
         // 硬规则
         bool r2 = bull ? p2.price > p0.price : p2.price < p0.price   // 浪2 不跌破起点
         bool r3 = not (l3 < l1 and l3 < l5)                          // 浪3 不是最短
-        bool r4 = bull ? p4.price > p1.price : p4.price < p1.price   // 浪4 不进浪1区间
+        // 浪4 不进浪1 区间。ovTol = 0 是严格版；放宽后允许侵入浪1 长度的 ovTol 倍
+        float tol = l1 * ovTol
+        bool r4 = bull ? p4.price > p1.price - tol : p4.price < p1.price + tol
         bool r5 = not need5 or (bull ? p5.price > p3.price : p5.price < p3.price)
         // 注：r4 + 交替性已经蕴含 P3 越过 P1，所以不用再单列一条
 

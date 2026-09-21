@@ -214,6 +214,9 @@ bool aForm  = false
 bool aTouch = false
 bool aTrig  = false
 bool aDead  = false
+// 方向分开记，样式页里「看跌形成」和「看涨形成」才能各自配色
+bool formBear = false
+bool formBull = false
 
 if newPiv and array.size(pivs) >= 4
     int n = array.size(pivs)
@@ -232,8 +235,17 @@ if newPiv and array.size(pivs) >= 4
     if bear or bull
         mkPat(bear, a, b, c, d)
         aForm := true
+        formBear := bear
+        formBull := bull
 
 // ───────────────────────────────────────────────────────── 5. 每根维护
+
+// 离当前价**最近的**那个还活着的区。样式页的 plot 只画这一对，不画全部 ——
+// 全部已经由 box 画了；这一对是「现在真正挡在你前面的那个价位」。
+float supTop = na      // 上方最近的供给区
+float supBot = na
+float demTop = na      // 下方最近的需求区
+float demBot = na
 
 if array.size(pats) > 0
     for i = 0 to array.size(pats) - 1
@@ -285,6 +297,15 @@ if array.size(pats) > 0
                         box.set_border_width(p.bx, 2)
                         if not na(p.lbQ)
                             label.set_text(p.lbQ, "QM ✓")
+                // 记下离现价最近的活跃区，供样式页那一层用
+                if p.isBear and p.zBot >= close
+                    if na(supBot) or p.zBot < supBot
+                        supBot := p.zBot
+                        supTop := p.zTop
+                if not p.isBear and p.zTop <= close
+                    if na(demTop) or p.zTop > demTop
+                        demTop := p.zTop
+                        demBot := p.zBot
 
 // ───────────────────────────────────────────────────────── 6. 警报
 
@@ -292,3 +313,47 @@ alertcondition(aForm,  "QM 形成",     "QM 形态形成（H→L→HH→LL 结�
 alertcondition(aTouch, "QM 回踩进区", "价格回踩进入 QM 供需区")
 alertcondition(aTrig,  "QM 触发",     "进区后出现反向收盘，QM 触发")
 alertcondition(aDead,  "QM 失效",     "收盘价穿出区域外沿，QM 形态失效")
+
+// ───────────────────────────────────────────────────────── 7. 样式页输出
+//
+// **为什么要有这一节**：TradingView 的「样式」标签页只收 plot 家族的输出 ——
+// plot / plotshape / plotchar / fill / bgcolor / hline。line、box、label 这类
+// 绘图对象永远进不了样式页，那是 TradingView 的设计，不是这份脚本的取舍。
+//
+// 所以这里把两件东西**再用 plot 家族输出一遍**：
+//   1  离现价最近的那一对活跃供需区（不是全部 —— 全部已经由 box 画了）
+//   2  四个事件（形成/回踩/触发/失效）
+// 于是你在样式页里能拿到颜色、不透明度、厚度、线条样式那一整套控件。
+//
+// 这一层和绘图对象那一层**是重叠的**。只想要一层的话：在样式页里把这一节
+// 全部取消勾选，或者反过来 —— 把输入页里 ③ 的标签开关关掉、只留这一层。
+
+pSupTop = plot(supTop, "最近供给区 上沿", color = #ef5350, linewidth = 1,
+     style = plot.style_linebr, display = display.pane)
+pSupBot = plot(supBot, "最近供给区 下沿 = QM Level", color = #ef5350, linewidth = 2,
+     style = plot.style_linebr, display = display.pane)
+fill(pSupTop, pSupBot, color = color.new(#ef5350, 90), title = "最近供给区 填充")
+
+pDemTop = plot(demTop, "最近需求区 上沿 = QM Level", color = #26a69a, linewidth = 2,
+     style = plot.style_linebr, display = display.pane)
+pDemBot = plot(demBot, "最近需求区 下沿", color = #26a69a, linewidth = 1,
+     style = plot.style_linebr, display = display.pane)
+fill(pDemTop, pDemBot, color = color.new(#26a69a, 90), title = "最近需求区 填充")
+
+plotshape(formBear, "事件 · 看跌 QM 形成", shape.triangledown, location.abovebar,
+     color = #ef5350, size = size.tiny)
+plotshape(formBull, "事件 · 看涨 QM 形成", shape.triangleup, location.belowbar,
+     color = #26a69a, size = size.tiny)
+plotshape(aTouch, "事件 · 回踩进区", shape.circle, location.absolute,
+     color = #ffa726, size = size.tiny)
+plotshape(aTrig,  "事件 · 触发",     shape.diamond, location.absolute,
+     color = #ffffff, size = size.tiny)
+plotshape(aDead,  "事件 · 失效",     shape.xcross, location.absolute,
+     color = #787b86, size = size.tiny)
+
+// 价格落在最近那个活跃区**里面**的时候给背景上色。样式页里可改颜色，
+// 不想要就取消勾选。
+bgcolor(not na(supBot) and high >= supBot and low <= supTop
+     ? color.new(#ef5350, 92) : na, title = "背景 · 现价在供给区内")
+bgcolor(not na(demTop) and low <= demTop and high >= demBot
+     ? color.new(#26a69a, 92) : na, title = "背景 · 现价在需求区内")

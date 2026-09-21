@@ -116,6 +116,7 @@ type Wave
     line  ray
     label projLb
     int   tgtBi      // 推演终点所在的 bar；走过它推演就过期了
+    float tgtPx      // 推演目标价，样式页那一层要用
     bool  expired
 
 type Lv
@@ -133,16 +134,20 @@ type Lv
     array<Wave> ws
     array<line> zz
     int         hits
+    int         lastDir   // 最近一次命中的方向：+1 看涨, −1 看跌（样式页分色用）
 
 var Lv LA = Lv.new(name = "A", mult = mA, col = cA, wid = wA, on = onA, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
-     pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(), hits = 0)
+     pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
+     hits = 0, lastDir = 0)
 var Lv LB = Lv.new(name = "B", mult = mB, col = cB, wid = wB, on = onB, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
-     pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(), hits = 0)
+     pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
+     hits = 0, lastDir = 0)
 var Lv LC = Lv.new(name = "C", mult = mC, col = cC, wid = wC, on = onC, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
-     pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(), hits = 0)
+     pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
+     hits = 0, lastDir = 0)
 
 // ZigZag 单步。返回：本根是否**确认**了一个新枢轴。
 // 确认条件是收盘价从当前腿的极值反向走出 thr —— 收盘才算，所以枢轴一旦确认
@@ -272,6 +277,7 @@ method detect(Lv L) =>
         if (bull or bear) and r2 and r3 and r4 and r5 and rBi and rSpan
             found := true
             L.hits := L.hits + 1
+            L.lastDir := bull ? 1 : -1
             bool star = fibOn and l3 >= fibN * l1
             int  wThick = star ? L.wid + starW : L.wid
 
@@ -311,6 +317,7 @@ method detect(Lv L) =>
                 float full = math.abs(p5.price - p0.price)
                 float tgt  = bull ? p5.price - full * projRetr : p5.price + full * projRetr
                 w.tgtBi := tgtBi
+                w.tgtPx := tgt
 
                 // 斜线：从 P5 指向目标，用**自己的颜色**（和三个级别都不同），
                 // 否则它和浪线一个色一个形状，在图上根本认不出来
@@ -346,6 +353,16 @@ method sweep(Lv L) =>
                 w.expired := true
                 delProj(w)
 
+// 还没过期的推演目标价，给样式页那一层用（没有就是 na，plot 自动断开）
+method activeTgt(Lv L) =>
+    float t = na
+    if array.size(L.ws) > 0
+        for i = 0 to array.size(L.ws) - 1
+            Wave w = array.get(L.ws, i)
+            if not w.expired and not na(w.tgtPx)
+                t := w.tgtPx
+    t
+
 // ───────────────────────────────────────────────────────── 5. 每根维护
 
 // 输入可能被改；每根同步回对象，免得改了参数不生效
@@ -378,6 +395,13 @@ LA.sweep()
 LB.sweep()
 LC.sweep()
 
+// 样式页那一层要用的序列
+float tgtA = LA.on ? LA.activeTgt() : na
+float tgtB = LB.on ? LB.activeTgt() : na
+float tgtC = LC.on ? LC.activeTgt() : na
+bool  wvBull = (hitA and LA.lastDir > 0) or (hitB and LB.lastDir > 0) or (hitC and LC.lastDir > 0)
+bool  wvBear = (hitA and LA.lastDir < 0) or (hitB and LB.lastDir < 0) or (hitC and LC.lastDir < 0)
+
 if showTbl and barstate.islast
     var table tb = table.new(position.bottom_right, 2, 5,
          bgcolor = color.new(color.black, 20), border_width = 1,
@@ -403,3 +427,26 @@ alertcondition(hitA or hitB or hitC, "推动浪成立（任意级别）", "1-2-3
 alertcondition(hitA, "推动浪成立 · 级别A", "级别 A（ATR×小倍数）出现 1-2-3-4-5")
 alertcondition(hitB, "推动浪成立 · 级别B", "级别 B 出现 1-2-3-4-5")
 alertcondition(hitC, "推动浪成立 · 级别C", "级别 C（ATR×大倍数）出现 1-2-3-4-5")
+
+// ───────────────────────────────────────────────────────── 7. 样式页输出
+//
+// TradingView 的「样式」标签页只收 plot 家族的输出（plot / plotshape /
+// plotchar / fill / bgcolor / hline）。line、label、box 这类绘图对象永远
+// 进不了样式页 —— 那是 TradingView 的设计，不是这份脚本的取舍。浪线和推演
+// 斜线必须是绘图对象（它们连接的是任意两根 bar），所以那部分的颜色线宽只能
+// 在输入页第 ④ 组调；下面这些是能进样式页的部分。
+//
+// 三条目标价线用 style_linebr：推演过期之后值变 na，线**自动断开**，
+// 不会像原来那样拖一条横穿图表的假线。
+
+plot(tgtA, "级别A 推演目标价", color = #42a5f5, linewidth = 1,
+     style = plot.style_linebr, display = display.pane)
+plot(tgtB, "级别B 推演目标价", color = #ab47bc, linewidth = 1,
+     style = plot.style_linebr, display = display.pane)
+plot(tgtC, "级别C 推演目标价", color = #ffa726, linewidth = 1,
+     style = plot.style_linebr, display = display.pane)
+
+plotshape(wvBull, "事件 · 看涨推动浪成立", shape.triangleup, location.belowbar,
+     color = #26a69a, size = size.small)
+plotshape(wvBear, "事件 · 看跌推动浪成立", shape.triangledown, location.abovebar,
+     color = #ef5350, size = size.small)

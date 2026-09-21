@@ -210,9 +210,9 @@ method detect(Lv L) =>
             // 推演：1-5 走完接 ABC 调整，按回撤比例给一个目标价 + 大致耗时
             if showProj
                 int span  = math.max(1, p5.bi - p0.bi)
-                int step  = math.max(1, int(math.round(span * projTime)))
+                int dbars = math.max(1, int(math.round(span * projTime)))
                 // 450 是留给 TradingView 的未来绘图上限（最多 500 根）
-                int tgtBi = math.min(p5.bi + step, bar_index + 450)
+                int tgtBi = math.min(p5.bi + dbars, bar_index + 450)
                 float full = math.abs(p5.price - p0.price)
                 float tgt  = bull ? p5.price - full * projRetr : p5.price + full * projRetr
                 w.proj := line.new(p5.bi, p5.price, tgtBi, tgt, xloc = xloc.bar_index,

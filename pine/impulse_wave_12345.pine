@@ -1,0 +1,278 @@
+//@version=6
+// =============================================================================
+// 推动浪 1-2-3-4-5  —  多级别 ZigZag + 艾略特硬规则校验 + 斐波那契推演
+// =============================================================================
+// 骨架和 quasimodo_zones.pine 完全一样：
+//   ①输入 → ②枢轴序列 → ③形态对象 → ④检测 → ⑤每根维护 → ⑥警报
+// 换别的形态时只改 ④。
+//
+// 枢轴用 ATR×倍数的反转阈值（ZigZag），不用 ta.pivot*：
+//   pivot 的 left/right 是**根数**，同一个 left=5 在暴涨和横盘里量到的东西
+//   完全不是一回事；ATR 阈值量的是**幅度**，三个倍数（×2 / ×4 / ×8）才真的
+//   构成三个级别。
+//
+// 硬规则只有三条半（第四条可关）：
+//   浪2 不跌破浪起点 P0
+//   浪3 不是 1、3、5 中最短的
+//   浪4 不进入浪1 的价格区间
+//   （可选）浪5 超越浪3 端点 —— 关掉就允许衰竭浪
+// 斐波那契比例只做加分项：浪3 ≥ 1.618×浪1 时把那一段画粗、标 ★。
+//
+// ⚠ 重绘：已确认的枢轴不重绘（阈值一旦被收盘价突破就钉死），但**最新一浪**
+//   在当根K线走完前会反复出现/消失，而且下一个枢轴确认后整组数浪可能被一组
+//   不同的数浪取代。所有判定以收盘为准。
+// =============================================================================
+
+indicator("推动浪 1-2-3-4-5 多级别", "Impulse 1-5", overlay = true,
+     max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+
+// ───────────────────────────────────────────────────────── 1. 输入
+
+gZ = "① ZigZag（ATR 反转阈值）"
+atrLen = input.int(14, "ATR 周期", minval = 1, group = gZ)
+mA = input.float(2.0, "级别 A 阈值 = ATR ×", minval = 0.2, step = 0.5, group = gZ)
+mB = input.float(4.0, "级别 B 阈值 = ATR ×", minval = 0.2, step = 0.5, group = gZ)
+mC = input.float(8.0, "级别 C 阈值 = ATR ×", minval = 0.2, step = 0.5, group = gZ)
+onA = input.bool(true,  "启用级别 A（最细）", group = gZ)
+onB = input.bool(true,  "启用级别 B",        group = gZ)
+onC = input.bool(true,  "启用级别 C（最粗）", group = gZ)
+
+gR = "② 校验规则"
+need5 = input.bool(true, "浪5 必须超越浪3 端点", group = gR,
+     tooltip = "关掉 = 允许衰竭浪（truncated fifth）。这是你三条硬规则之外我加的第四条，" +
+               "所以做成开关：衰竭浪在艾略特里合法但少见，默认打开能少掉很多噪声数浪。")
+fibOn = input.bool(true,  "浪3 ≥ N×浪1 时加粗标 ★（仅加分）", group = gR)
+fibN  = input.float(1.618, "加分比例 N", minval = 0.5, step = 0.1, group = gR)
+
+gP = "③ 推演"
+showProj = input.bool(true, "画下一段推演虚线", group = gP,
+     tooltip = "1-5 走完之后按艾略特接的是 ABC 调整，所以这条虚线画的是**调整目标**，" +
+               "不是第 6 浪。价位 = P5 回撤 (1-5 全长) × 下面那个比例。")
+projRetr = input.float(0.5, "推演价位：回撤 1-5 全长的", minval = 0.05, maxval = 1.0, step = 0.05, group = gP)
+projTime = input.float(0.5, "推演耗时：1-5 跨度的",     minval = 0.1, maxval = 3.0, step = 0.1, group = gP)
+
+gS = "④ 显示"
+cA = input.color(#42a5f5, "级别 A 颜色", group = gS)
+cB = input.color(#ab47bc, "级别 B 颜色", group = gS)
+cC = input.color(#ffa726, "级别 C 颜色", group = gS)
+showZZ  = input.bool(false, "画出 ZigZag 骨架（调阈值时打开）", group = gS)
+showTbl = input.bool(true,  "右下角状态表",                  group = gS)
+maxPat  = input.int(2, "每个级别保留最近几组", minval = 1, maxval = 8, group = gS)
+
+atrV = nz(ta.atr(atrLen), syminfo.mintick * 10.0)
+
+// ───────────────────────────────────────────────────────── 2. 枢轴序列
+
+type Piv
+    float price
+    int   bi
+    bool  isHigh
+
+type Wave
+    array<line>  segs
+    array<label> lbs
+    line  proj
+    label projLb
+
+type Lv
+    string      name
+    float       mult
+    color       col
+    bool        on
+    int         dir      // +1 = 正在跟踪上升腿（找高点）, −1 = 下降腿
+    float       ext      // 当前腿的极值
+    int         extBi
+    array<Piv>  pv
+    array<Wave> ws
+    array<line> zz
+    int         hits
+
+var Lv LA = Lv.new(name = "A", mult = mA, col = cA, on = onA, dir = 0, ext = na, extBi = na,
+     pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(), hits = 0)
+var Lv LB = Lv.new(name = "B", mult = mB, col = cB, on = onB, dir = 0, ext = na, extBi = na,
+     pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(), hits = 0)
+var Lv LC = Lv.new(name = "C", mult = mC, col = cC, on = onC, dir = 0, ext = na, extBi = na,
+     pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(), hits = 0)
+
+// ZigZag 单步。返回：本根是否**确认**了一个新枢轴。
+// 确认条件是收盘价从当前腿的极值反向走出 thr —— 收盘才算，所以枢轴一旦确认
+// 就不会被后来的行情抹掉（极值点本身在过去，不需要未来数据）。
+method zigzag(Lv L, float thr) =>
+    bool confirmed = false
+    if na(L.dir) or L.dir == 0
+        L.dir   := 1
+        L.ext   := high
+        L.extBi := bar_index
+    else if L.dir == 1
+        if high > L.ext
+            L.ext   := high
+            L.extBi := bar_index
+        if close < L.ext - thr
+            array.push(L.pv, Piv.new(L.ext, L.extBi, true))
+            confirmed := true
+            L.dir   := -1
+            L.ext   := low
+            L.extBi := bar_index
+    else
+        if low < L.ext
+            L.ext   := low
+            L.extBi := bar_index
+        if close > L.ext + thr
+            array.push(L.pv, Piv.new(L.ext, L.extBi, false))
+            confirmed := true
+            L.dir   := 1
+            L.ext   := high
+            L.extBi := bar_index
+
+    if array.size(L.pv) > 24
+        array.shift(L.pv)
+
+    // ZigZag 骨架（只为调阈值用，默认关）
+    if confirmed and showZZ and array.size(L.pv) >= 2
+        Piv q0 = array.get(L.pv, array.size(L.pv) - 2)
+        Piv q1 = array.get(L.pv, array.size(L.pv) - 1)
+        array.push(L.zz, line.new(q0.bi, q0.price, q1.bi, q1.price, xloc = xloc.bar_index,
+             color = color.new(L.col, 55), width = 1))
+        if array.size(L.zz) > 40
+            line.delete(array.shift(L.zz))
+    confirmed
+
+// ───────────────────────────────────────────────────────── 3. 形态对象
+
+delWave(Wave w) =>
+    if array.size(w.segs) > 0
+        for i = 0 to array.size(w.segs) - 1
+            line.delete(array.get(w.segs, i))
+    if array.size(w.lbs) > 0
+        for i = 0 to array.size(w.lbs) - 1
+            label.delete(array.get(w.lbs, i))
+    line.delete(w.proj)
+    label.delete(w.projLb)
+
+// ───────────────────────────────────────────────────────── 4. 检测（换形态只改这一节）
+
+// 最近 6 个交替枢轴 P0..P5：
+//   看涨  低 高 低 高 低 高      浪1 = P0→P1 ... 浪5 = P4→P5
+//   看跌  高 低 高 低 高 低      完全镜像
+method detect(Lv L) =>
+    bool found = false
+    int n = array.size(L.pv)
+    if n >= 6
+        Piv p0 = array.get(L.pv, n - 6)
+        Piv p1 = array.get(L.pv, n - 5)
+        Piv p2 = array.get(L.pv, n - 4)
+        Piv p3 = array.get(L.pv, n - 3)
+        Piv p4 = array.get(L.pv, n - 2)
+        Piv p5 = array.get(L.pv, n - 1)
+
+        bool bull = not p0.isHigh and p1.isHigh and not p2.isHigh
+                     and p3.isHigh and not p4.isHigh and p5.isHigh
+        bool bear = p0.isHigh and not p1.isHigh and p2.isHigh
+                     and not p3.isHigh and p4.isHigh and not p5.isHigh
+
+        float l1 = math.abs(p1.price - p0.price)
+        float l3 = math.abs(p3.price - p2.price)
+        float l5 = math.abs(p5.price - p4.price)
+
+        // 硬规则
+        bool r2 = bull ? p2.price > p0.price : p2.price < p0.price   // 浪2 不跌破起点
+        bool r3 = not (l3 < l1 and l3 < l5)                          // 浪3 不是最短
+        bool r4 = bull ? p4.price > p1.price : p4.price < p1.price   // 浪4 不进浪1区间
+        bool r5 = not need5 or (bull ? p5.price > p3.price : p5.price < p3.price)
+        // 注：r4 + 交替性已经蕴含 P3 越过 P1，所以不用再单列一条
+
+        if (bull or bear) and r2 and r3 and r4 and r5
+            found := true
+            L.hits := L.hits + 1
+            bool star = fibOn and l3 >= fibN * l1
+
+            Wave w = Wave.new(segs = array.new<line>(), lbs = array.new<label>())
+
+            // P0→P5 连线，浪3 达标时加粗
+            array.push(w.segs, line.new(p0.bi, p0.price, p1.bi, p1.price,
+                 xloc = xloc.bar_index, color = L.col, width = 2))
+            array.push(w.segs, line.new(p1.bi, p1.price, p2.bi, p2.price,
+                 xloc = xloc.bar_index, color = L.col, width = 2))
+            array.push(w.segs, line.new(p2.bi, p2.price, p3.bi, p3.price,
+                 xloc = xloc.bar_index, color = L.col, width = star ? 4 : 2))
+            array.push(w.segs, line.new(p3.bi, p3.price, p4.bi, p4.price,
+                 xloc = xloc.bar_index, color = L.col, width = 2))
+            array.push(w.segs, line.new(p4.bi, p4.price, p5.bi, p5.price,
+                 xloc = xloc.bar_index, color = L.col, width = 2))
+
+            for k = 1 to 5
+                Piv q = array.get(L.pv, n - 6 + k)
+                string txt = "(" + str.tostring(k) + ")" + (k == 3 and star ? " ★" : "")
+                array.push(w.lbs, label.new(q.bi, q.price, txt, xloc = xloc.bar_index,
+                     style = q.isHigh ? label.style_label_down : label.style_label_up,
+                     color = color.new(L.col, 25), textcolor = color.white, size = size.tiny))
+
+            // 推演：1-5 走完接 ABC 调整，按回撤比例给一个目标价 + 大致耗时
+            if showProj
+                int span  = math.max(1, p5.bi - p0.bi)
+                int step  = math.max(1, int(math.round(span * projTime)))
+                // 450 是留给 TradingView 的未来绘图上限（最多 500 根）
+                int tgtBi = math.min(p5.bi + step, bar_index + 450)
+                float full = math.abs(p5.price - p0.price)
+                float tgt  = bull ? p5.price - full * projRetr : p5.price + full * projRetr
+                w.proj := line.new(p5.bi, p5.price, tgtBi, tgt, xloc = xloc.bar_index,
+                     color = color.new(L.col, 25), style = line.style_dashed, width = 2)
+                w.projLb := label.new(tgtBi, tgt,
+                     L.name + " 推演 " + str.tostring(tgt, format.mintick),
+                     xloc = xloc.bar_index,
+                     style = bull ? label.style_label_up : label.style_label_down,
+                     color = color.new(L.col, 55), textcolor = color.white, size = size.tiny)
+
+            array.push(L.ws, w)
+            if array.size(L.ws) > maxPat
+                delWave(array.shift(L.ws))
+    found
+
+// ───────────────────────────────────────────────────────── 5. 每根维护
+
+// 倍数是 input，可能被改；每根同步回对象，免得改参数后不生效
+LA.mult := mA
+LA.col  := cA
+LA.on   := onA
+LB.mult := mB
+LB.col  := cB
+LB.on   := onB
+LC.mult := mC
+LC.col  := cC
+LC.on   := onC
+
+bool hitA = false
+bool hitB = false
+bool hitC = false
+
+if LA.on and LA.zigzag(atrV * LA.mult)
+    hitA := LA.detect()
+if LB.on and LB.zigzag(atrV * LB.mult)
+    hitB := LB.detect()
+if LC.on and LC.zigzag(atrV * LC.mult)
+    hitC := LC.detect()
+
+if showTbl and barstate.islast
+    var table tb = table.new(position.bottom_right, 2, 5,
+         bgcolor = color.new(color.black, 20), border_width = 1,
+         border_color = color.new(color.gray, 60))
+    table.cell(tb, 0, 0, "级别", text_color = color.silver, text_size = size.tiny)
+    table.cell(tb, 1, 0, "阈值 / 累计命中", text_color = color.silver, text_size = size.tiny)
+    table.cell(tb, 0, 1, "A", text_color = cA, text_size = size.tiny)
+    table.cell(tb, 1, 1, (LA.on ? "ATR×" + str.tostring(mA) + "  ·  " + str.tostring(LA.hits) : "关"),
+         text_color = cA, text_size = size.tiny)
+    table.cell(tb, 0, 2, "B", text_color = cB, text_size = size.tiny)
+    table.cell(tb, 1, 2, (LB.on ? "ATR×" + str.tostring(mB) + "  ·  " + str.tostring(LB.hits) : "关"),
+         text_color = cB, text_size = size.tiny)
+    table.cell(tb, 0, 3, "C", text_color = cC, text_size = size.tiny)
+    table.cell(tb, 1, 3, (LC.on ? "ATR×" + str.tostring(mC) + "  ·  " + str.tostring(LC.hits) : "关"),
+         text_color = cC, text_size = size.tiny)
+    table.cell(tb, 0, 4, "⚠", text_color = color.orange, text_size = size.tiny)
+    table.cell(tb, 1, 4, "最新一浪会随行情重绘", text_color = color.orange, text_size = size.tiny)
+
+// ───────────────────────────────────────────────────────── 6. 警报
+
+alertcondition(hitA or hitB or hitC, "推动浪成立（任意级别）", "1-2-3-4-5 推动浪校验通过")
+alertcondition(hitA, "推动浪成立 · 级别A", "级别 A（ATR×小倍数）出现 1-2-3-4-5")
+alertcondition(hitB, "推动浪成立 · 级别B", "级别 B 出现 1-2-3-4-5")
+alertcondition(hitC, "推动浪成立 · 级别C", "级别 C（ATR×大倍数）出现 1-2-3-4-5")

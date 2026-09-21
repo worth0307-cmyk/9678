@@ -1,0 +1,273 @@
+//@version=6
+// =============================================================================
+// Quasimodo (QM) 供需区  —  自动识别 H → L → HH → LL 并画出供给 / 需求区
+// =============================================================================
+// 结构：
+//   看跌 QM   H  → L  → HH(>H) → LL(<L)      QM Level = H 的价格
+//   看涨 QM   L  → H  → LL(<L) → HH(>H)      QM Level = L 的价格
+//
+// 也就是一个「头肩顶 / 头肩底 + 颈线被跌破」：HH 是头，H 是左肩。左肩那条
+// 价位（QML）被认为是机构没成交完的挂单区，价格回抽到那里被反推。
+//
+// 这个脚本只负责**画准**，不负责说它有效。本仓库 53 / 57 / 58 号脚本已经把
+// 四个趋势工具、斐波那契位、Impulse MACD 分别拿去对过去杠杆零假设，全部没过。
+// 这里的默认参数也没有经过任何优化 —— 它就是你规格书的直译。
+//
+// 无未来函数：ta.pivothigh/low 有 right 根确认延迟，所有绘图都回溯锚定到
+// bar_index - right，而形态成立与区域监控都从**确认那根**开始。
+// =============================================================================
+
+// max_bars_back：第 3 节要用 high[bar_index - H的bar] 这种**可变偏移**去取枢轴
+// 那根的影线，Pine 的自动推断对可变偏移经常判不出来，显式给足才不会报
+// "insufficient bars_back"。
+indicator("Quasimodo QM 供需区", "QM", overlay = true,
+     max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500,
+     max_bars_back = 1000)
+
+// ───────────────────────────────────────────────────────── 1. 输入
+
+gP = "① 摆动点"
+leftBars  = input.int(5, "Pivot 左侧根数", minval = 1, maxval = 50, group = gP)
+rightBars = input.int(5, "Pivot 右侧根数（= 确认延迟）", minval = 1, maxval = 50, group = gP,
+     tooltip = "枢轴要等右边 right 根走完才能确认。这不是缺陷，是「不偷看未来」的代价：" +
+               "形态最早只能在真实 LL 之后 right 根被报出来。")
+
+gZ = "② 区域"
+atrLen  = input.int(14, "ATR 周期", minval = 1, group = gZ)
+atrMult = input.float(0.5, "区域最小厚度 = ATR ×", minval = 0.0, step = 0.1, group = gZ)
+zMode   = input.string("QML 向外扩", "区域构造",
+     options = ["QML 向外扩", "枢轴K线影线"], group = gZ,
+     tooltip = "QML 向外扩（你规格书的写法）：看跌区 = [QML, QML + max(H那根上影线长, ATR×倍数)]，" +
+               "区域整体在 QML 之上。\n\n" +
+               "枢轴K线影线（供需区常见画法）：看跌区 = [H那根的实体上沿, H那根最高价]，" +
+               "也就是影线本身当区域，区域整体在 QML 之下。\n\n" +
+               "两者的失效/触发判定都按区域外沿走，含义一致，只是把「边界」放在 QML 的哪一侧。")
+maxPats = input.int(10, "保留最近几个形态", minval = 1, maxval = 60, group = gZ)
+
+gS = "③ 显示 / 警报"
+bearCol  = input.color(#ef5350, "看跌 · 供给区", group = gS)
+bullCol  = input.color(#26a69a, "看涨 · 需求区", group = gS)
+deadCol  = input.color(#787b86, "已失效",        group = gS)
+zOpa     = input.int(88, "区域填充透明度", minval = 0, maxval = 100, group = gS)
+showPts  = input.bool(true,  "标注 H / L / HH / LL", group = gS)
+showQML  = input.bool(true,  "标注 QM",              group = gS)
+hideDead = input.bool(false, "隐藏已失效形态",        group = gS)
+
+atrV = nz(ta.atr(atrLen), syminfo.mintick * 10.0)
+
+// ───────────────────────────────────────────────────────── 2. 摆动点序列
+
+// 保存最近若干个已确认枢轴，并**强制高低交替**。
+// 必须强制：ta.pivothigh 可以连着出两个高点而中间没有低点（例如 H,H,L），
+// 不归一化的话「第 n-4 个点」根本不保证是高点，形态判定会错位。
+type Piv
+    float price
+    int   bi
+    bool  isHigh
+
+var array<Piv> pivs = array.new<Piv>()
+
+addPiv(float p, int b, bool isH) =>
+    bool changed = false
+    int n = array.size(pivs)
+    if n == 0
+        array.push(pivs, Piv.new(p, b, isH))
+        changed := true
+    else
+        Piv last = array.get(pivs, n - 1)
+        if last.isHigh == isH
+            // 相邻同类型：只留更极端的那个（高点取更高，低点取更低）
+            if (isH and p > last.price) or (not isH and p < last.price)
+                last.price := p
+                last.bi    := b
+                changed    := true
+        else
+            array.push(pivs, Piv.new(p, b, isH))
+            changed := true
+    if array.size(pivs) > 16
+        array.shift(pivs)
+    changed
+
+ph = ta.pivothigh(high, leftBars, rightBars)
+pl = ta.pivotlow(low,  leftBars, rightBars)
+
+bool newPiv = false
+if not na(ph)
+    newPiv := addPiv(ph, bar_index - rightBars, true)
+if not na(pl)
+    newPiv := addPiv(pl, bar_index - rightBars, false) or newPiv
+
+// ───────────────────────────────────────────────────────── 3. 形态对象
+
+type QM
+    bool  isBear
+    float qml
+    float zTop
+    float zBot
+    int   hBi
+    bool  touched
+    bool  triggered
+    bool  dead
+    line  ln
+    box   bx
+    label lbQ
+    label l1
+    label l2
+    label l3
+    label l4
+
+var array<QM> pats = array.new<QM>()
+
+delPat(QM p) =>
+    line.delete(p.ln)
+    box.delete(p.bx)
+    label.delete(p.lbQ)
+    label.delete(p.l1)
+    label.delete(p.l2)
+    label.delete(p.l3)
+    label.delete(p.l4)
+
+// a=H  b=L  c=HH  d=LL   （看涨时高低互换）
+mkPat(bool isBear, Piv a, Piv b, Piv c, Piv d) =>
+    // 同一个左肩被更极端的枢轴刷新时，替换掉旧形态而不是并排画两个
+    int ns = array.size(pats)
+    if ns > 0
+        QM lastP = array.get(pats, ns - 1)
+        if lastP.hBi == a.bi and lastP.isBear == isBear
+            delPat(lastP)
+            array.pop(pats)
+
+    color col = isBear ? bearCol : bullCol
+    float qml = a.price
+    int   off = bar_index - a.bi
+
+    // 枢轴那根K线的影线长度：看跌用上影线，看涨用下影线
+    float wick = isBear ? high[off] - math.max(open[off], close[off])
+                        : math.min(open[off], close[off]) - low[off]
+    float thick = math.max(nz(wick), atrV * atrMult)
+    thick := thick <= 0 ? syminfo.mintick * 10.0 : thick
+
+    float zt = na
+    float zb = na
+    if zMode == "QML 向外扩"
+        zb := isBear ? qml : qml - thick
+        zt := isBear ? qml + thick : qml
+    else
+        if isBear
+            zt := qml
+            zb := math.min(math.max(open[off], close[off]), qml - atrV * atrMult)
+        else
+            zb := qml
+            zt := math.max(math.min(open[off], close[off]), qml + atrV * atrMult)
+
+    // QM Level 从左肩画起（看得见它的来历），区域从 LL 画起向右延伸
+    line ln = line.new(a.bi, qml, bar_index + 1, qml, xloc = xloc.bar_index,
+         color = col, style = line.style_dashed, width = 1)
+    box bx = box.new(d.bi, zt, bar_index + 1, zb, xloc = xloc.bar_index,
+         border_color = color.new(col, 45), border_width = 1,
+         bgcolor = color.new(col, zOpa))
+
+    label lq = na
+    if showQML
+        lq := label.new(d.bi, qml, "QM", xloc = xloc.bar_index,
+             style = isBear ? label.style_label_down : label.style_label_up,
+             color = color.new(col, 20), textcolor = color.white, size = size.tiny)
+
+    label l1 = na
+    label l2 = na
+    label l3 = na
+    label l4 = na
+    if showPts
+        string n1 = isBear ? "H"  : "L"
+        string n2 = isBear ? "L"  : "H"
+        string n3 = isBear ? "HH" : "LL"
+        string n4 = isBear ? "LL" : "HH"
+        l1 := label.new(a.bi, a.price, n1, xloc = xloc.bar_index,
+             style = a.isHigh ? label.style_label_down : label.style_label_up,
+             color = color.new(col, 35), textcolor = color.white, size = size.tiny)
+        l2 := label.new(b.bi, b.price, n2, xloc = xloc.bar_index,
+             style = b.isHigh ? label.style_label_down : label.style_label_up,
+             color = color.new(col, 35), textcolor = color.white, size = size.tiny)
+        l3 := label.new(c.bi, c.price, n3, xloc = xloc.bar_index,
+             style = c.isHigh ? label.style_label_down : label.style_label_up,
+             color = color.new(col, 35), textcolor = color.white, size = size.tiny)
+        l4 := label.new(d.bi, d.price, n4, xloc = xloc.bar_index,
+             style = d.isHigh ? label.style_label_down : label.style_label_up,
+             color = color.new(col, 35), textcolor = color.white, size = size.tiny)
+
+    array.push(pats, QM.new(isBear = isBear, qml = qml, zTop = zt, zBot = zb,
+         hBi = a.bi, touched = false, triggered = false, dead = false,
+         ln = ln, bx = bx, lbQ = lq, l1 = l1, l2 = l2, l3 = l3, l4 = l4))
+
+    // 超过上限就删最旧的，避免撞 TradingView 的 500 对象天花板
+    if array.size(pats) > maxPats
+        delPat(array.shift(pats))
+
+// ───────────────────────────────────────────────────────── 4. 检测
+
+bool aForm  = false
+bool aTouch = false
+bool aTrig  = false
+bool aDead  = false
+
+if newPiv and array.size(pivs) >= 4
+    int n = array.size(pivs)
+    Piv a = array.get(pivs, n - 4)
+    Piv b = array.get(pivs, n - 3)
+    Piv c = array.get(pivs, n - 2)
+    Piv d = array.get(pivs, n - 1)
+
+    // 看跌：高 低 高 低，且 HH > H、LL < L（跌破 L 才算结构反转）
+    bool bear = a.isHigh and not b.isHigh and c.isHigh and not d.isHigh
+                 and c.price > a.price and d.price < b.price
+    // 看涨：低 高 低 高，完全镜像
+    bool bull = not a.isHigh and b.isHigh and not c.isHigh and d.isHigh
+                 and c.price < a.price and d.price > b.price
+
+    if bear or bull
+        mkPat(bear, a, b, c, d)
+        aForm := true
+
+// ───────────────────────────────────────────────────────── 5. 每根维护
+
+if array.size(pats) > 0
+    for i = 0 to array.size(pats) - 1
+        QM p = array.get(pats, i)
+        if not p.dead
+            // 失效：收盘价穿出区域的**外沿**（看跌 = 上沿，看涨 = 下沿）
+            bool brk = p.isBear ? close > p.zTop : close < p.zBot
+            if brk
+                p.dead := true
+                aDead  := true
+                if hideDead
+                    delPat(p)
+                else
+                    box.set_bgcolor(p.bx, color.new(deadCol, math.min(99, zOpa + 5)))
+                    box.set_border_color(p.bx, color.new(deadCol, 55))
+                    line.set_color(p.ln, color.new(deadCol, 40))
+                    if not na(p.lbQ)
+                        label.set_color(p.lbQ, color.new(deadCol, 40))
+            else
+                box.set_right(p.bx, bar_index + 1)
+                line.set_x2(p.ln, bar_index + 1)
+                // 回踩进区
+                if not p.touched
+                    bool inZone = p.isBear ? high >= p.zBot : low <= p.zTop
+                    if inZone
+                        p.touched := true
+                        aTouch    := true
+                // 触发：进过区之后，出现一根收盘回到区外（交易方向那一侧）的K线。
+                // 默认模式下 zBot 就是 QM Level，所以这条等价于你写的
+                // 「收盘价低于 QM Level」；换成影线模式时它自动对齐到区域边界。
+                if p.touched and not p.triggered
+                    bool trg = p.isBear ? close < p.zBot : close > p.zTop
+                    if trg
+                        p.triggered := true
+                        aTrig       := true
+
+// ───────────────────────────────────────────────────────── 6. 警报
+
+alertcondition(aForm,  "QM 形成",     "QM 形态形成（H→L→HH→LL 结构反转已确认）")
+alertcondition(aTouch, "QM 回踩进区", "价格回踩进入 QM 供需区")
+alertcondition(aTrig,  "QM 触发",     "进区后出现反向收盘，QM 触发")
+alertcondition(aDead,  "QM 失效",     "收盘价穿出区域外沿，QM 形态失效")

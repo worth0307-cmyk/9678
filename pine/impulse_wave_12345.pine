@@ -32,13 +32,35 @@ indicator("推动浪 1-2-3-4-5 多级别", "Impulse 1-5", overlay = true,
 // ───────────────────────────────────────────────────────── 1. 输入
 
 gZ = "① ZigZag（ATR 反转阈值）"
+tfAuto = input.bool(true, "阈值按周期自动缩放（推荐）", group = gZ,
+     tooltip = "**打开之后下面三个手动值不生效。**\n\n" +
+               "为什么需要这个：阈值是 ATR 倍数，幅度上跨周期自适应，但**枢轴数量不会** ——" +
+               "枢轴数取决于图上有多少根K线。实测 ETH：日线 1713 根，ATR×2/×4/×8 给出" +
+               "114/42/15 个枢轴；周线只有 246 根，同样的倍数只给出 14/7/**3** 个。" +
+               "3 个枢轴连一个 6 点窗口都凑不出来，级别 C 就永远是空的。\n\n" +
+               "自动模式按图表周期选：\n" +
+               "  月线      0.25 / 0.5 / 0.75\n" +
+               "  周线      0.5  / 1.0 / 1.5\n" +
+               "  日线·4h   2    / 4   / 8\n" +
+               "  4h 以下   3    / 6   / 12\n\n" +
+               "状态表第二列显示的是**实际生效**的倍数。")
 atrLen = input.int(14, "ATR 周期", minval = 1, group = gZ)
-mA = input.float(2.0, "级别 A 阈值 = ATR ×", minval = 0.2, step = 0.5, group = gZ)
-mB = input.float(4.0, "级别 B 阈值 = ATR ×", minval = 0.2, step = 0.5, group = gZ)
-mC = input.float(8.0, "级别 C 阈值 = ATR ×", minval = 0.2, step = 0.5, group = gZ)
+mA = input.float(2.0, "手动：级别 A 阈值 = ATR ×", minval = 0.1, step = 0.1, group = gZ)
+mB = input.float(4.0, "手动：级别 B 阈值 = ATR ×", minval = 0.1, step = 0.1, group = gZ)
+mC = input.float(8.0, "手动：级别 C 阈值 = ATR ×", minval = 0.1, step = 0.1, group = gZ)
 onA = input.bool(true,  "启用级别 A（最细）", group = gZ)
 onB = input.bool(true,  "启用级别 B",        group = gZ)
 onC = input.bool(false, "启用级别 C（最粗）", group = gZ)
+
+// 按图表周期挑倍数。分档依据是「多少根K线」，不是「多大幅度」：
+// 周期越大，图上的根数越少，同样的倍数就会把枢轴饿死。
+tfSec = timeframe.in_seconds()
+autoA = tfSec >= 2592000 ? 0.25 : tfSec >= 604800 ? 0.5 : tfSec >= 14400 ? 2.0 : 3.0
+autoB = tfSec >= 2592000 ? 0.50 : tfSec >= 604800 ? 1.0 : tfSec >= 14400 ? 4.0 : 6.0
+autoC = tfSec >= 2592000 ? 0.75 : tfSec >= 604800 ? 1.5 : tfSec >= 14400 ? 8.0 : 12.0
+useA = tfAuto ? autoA : mA
+useB = tfAuto ? autoB : mB
+useC = tfAuto ? autoC : mC
 
 gR = "② 校验规则"
 need5 = input.bool(true, "浪5 必须超越浪3 端点", group = gR,
@@ -167,15 +189,15 @@ type Lv
     string      note      // 状态表用：现在卡在哪一条
     int         pvTotal   // 累计确认的枢轴数。L.pv 只保留最近 24 个，不能拿来显示
 
-var Lv LA = Lv.new(name = "A", mult = mA, col = cA, wid = wA, on = onA, dir = 0,
+var Lv LA = Lv.new(name = "A", mult = useA, col = cA, wid = wA, on = onA, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, note = "", pvTotal = 0)
-var Lv LB = Lv.new(name = "B", mult = mB, col = cB, wid = wB, on = onB, dir = 0,
+var Lv LB = Lv.new(name = "B", mult = useB, col = cB, wid = wB, on = onB, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, note = "", pvTotal = 0)
-var Lv LC = Lv.new(name = "C", mult = mC, col = cC, wid = wC, on = onC, dir = 0,
+var Lv LC = Lv.new(name = "C", mult = useC, col = cC, wid = wC, on = onC, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, note = "", pvTotal = 0)
@@ -516,15 +538,15 @@ method tentative(Lv L) =>
 // ───────────────────────────────────────────────────────── 5. 每根维护
 
 // 输入可能被改；每根同步回对象，免得改了参数不生效
-LA.mult := mA
+LA.mult := useA
 LA.col  := cA
 LA.wid  := wA
 LA.on   := onA
-LB.mult := mB
+LB.mult := useB
 LB.col  := cB
 LB.wid  := wB
 LB.on   := onB
-LC.mult := mC
+LC.mult := useC
 LC.col  := cC
 LC.wid  := wC
 LC.on   := onC
@@ -568,24 +590,25 @@ if showTbl and barstate.islast
          bgcolor = color.new(color.black, 20), border_width = 1,
          border_color = color.new(color.gray, 60))
     table.cell(tb, 0, 0, "级别",      text_color = color.silver, text_size = size.tiny)
-    table.cell(tb, 1, 0, "阈值",      text_color = color.silver, text_size = size.tiny)
+    table.cell(tb, 1, 0, tfAuto ? "阈值(自动)" : "阈值(手动)",
+     text_color = color.silver, text_size = size.tiny)
     table.cell(tb, 2, 0, "枢轴·命中", text_color = color.silver, text_size = size.tiny)
     table.cell(tb, 3, 0, "当前状态",  text_color = color.silver, text_size = size.tiny)
 
     table.cell(tb, 0, 1, "A", text_color = cA, text_size = size.tiny)
-    table.cell(tb, 1, 1, LA.on ? "ATR×" + str.tostring(mA) : "关", text_color = cA, text_size = size.tiny)
+    table.cell(tb, 1, 1, LA.on ? "ATR×" + str.tostring(useA) : "关", text_color = cA, text_size = size.tiny)
     table.cell(tb, 2, 1, LA.on ? str.tostring(LA.pvTotal) + " · " + str.tostring(LA.hits) : "",
          text_color = cA, text_size = size.tiny)
     table.cell(tb, 3, 1, LA.on ? LA.note : "", text_color = cA, text_size = size.tiny)
 
     table.cell(tb, 0, 2, "B", text_color = cB, text_size = size.tiny)
-    table.cell(tb, 1, 2, LB.on ? "ATR×" + str.tostring(mB) : "关", text_color = cB, text_size = size.tiny)
+    table.cell(tb, 1, 2, LB.on ? "ATR×" + str.tostring(useB) : "关", text_color = cB, text_size = size.tiny)
     table.cell(tb, 2, 2, LB.on ? str.tostring(LB.pvTotal) + " · " + str.tostring(LB.hits) : "",
          text_color = cB, text_size = size.tiny)
     table.cell(tb, 3, 2, LB.on ? LB.note : "", text_color = cB, text_size = size.tiny)
 
     table.cell(tb, 0, 3, "C", text_color = cC, text_size = size.tiny)
-    table.cell(tb, 1, 3, LC.on ? "ATR×" + str.tostring(mC) : "关", text_color = cC, text_size = size.tiny)
+    table.cell(tb, 1, 3, LC.on ? "ATR×" + str.tostring(useC) : "关", text_color = cC, text_size = size.tiny)
     table.cell(tb, 2, 3, LC.on ? str.tostring(LC.pvTotal) + " · " + str.tostring(LC.hits) : "",
          text_color = cC, text_size = size.tiny)
     table.cell(tb, 3, 3, LC.on ? LC.note : "", text_color = cC, text_size = size.tiny)

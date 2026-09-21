@@ -142,8 +142,13 @@ mkPat(bool isBear, Piv a, Piv b, Piv c, Piv d) =>
     int   off = bar_index - a.bi
 
     // 枢轴那根K线的影线长度：看跌用上影线，看涨用下影线
-    float wick = isBear ? high[off] - math.max(open[off], close[off])
-                        : math.min(open[off], close[off]) - low[off]
+    // 写成 if/else 而不是跨行三元：Pine 的续行**不能**缩进成 4 的倍数，
+    // 一个对齐到冒号的 24 空格续行会被当成新语句，报 CE10013。
+    float wick = 0.0
+    if isBear
+        wick := high[off] - math.max(open[off], close[off])
+    else
+        wick := math.min(open[off], close[off]) - low[off]
     float thick = math.max(nz(wick), atrV * atrMult)
     thick := thick <= 0 ? syminfo.mintick * 10.0 : thick
 

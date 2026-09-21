@@ -165,19 +165,20 @@ type Lv
     line        tRay      // 待定：目标价水平射线
     label       tLb
     string      note      // 状态表用：现在卡在哪一条
+    int         pvTotal   // 累计确认的枢轴数。L.pv 只保留最近 24 个，不能拿来显示
 
 var Lv LA = Lv.new(name = "A", mult = mA, col = cA, wid = wA, on = onA, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
-     hits = 0, lastDir = 0, note = "")
+     hits = 0, lastDir = 0, note = "", pvTotal = 0)
 var Lv LB = Lv.new(name = "B", mult = mB, col = cB, wid = wB, on = onB, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
-     hits = 0, lastDir = 0, note = "")
+     hits = 0, lastDir = 0, note = "", pvTotal = 0)
 var Lv LC = Lv.new(name = "C", mult = mC, col = cC, wid = wC, on = onC, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
-     hits = 0, lastDir = 0, note = "")
+     hits = 0, lastDir = 0, note = "", pvTotal = 0)
 
 // ZigZag 单步。返回：本根是否**确认**了一个新枢轴。
 // 确认条件是收盘价从当前腿的极值反向走出 thr —— 收盘才算，所以枢轴一旦确认
@@ -234,6 +235,8 @@ method zigzag(Lv L, float thr) =>
             L.ext   := high
             L.extBi := bar_index
 
+    if confirmed
+        L.pvTotal := L.pvTotal + 1
     if array.size(L.pv) > 24
         array.shift(L.pv)
 
@@ -415,10 +418,16 @@ method tentative(Lv L) =>
     L.note := ""
 
     int n = array.size(L.pv)
-    // 已经有正式推演挂在图上就不画待定 —— 否则两条线会打架。
-    // （6 个点确认之后，「最近 5 个点」正好是 P1..P5，方向反过来，
-    //   会被误读成一个反向的浪1-4 前缀。）
-    if not na(L.activeTgt())
+
+    // 枢轴饥饿警告。阈值是 ATR 倍数，幅度上跨周期自适应，但**枢轴数量不会** ——
+    // 它取决于图上有多少根K线。实测 ETH：日线 1713 根，ATR×2/×4/×8 给出
+    // 114/42/15 个枢轴；周线只有 246 根，同样的倍数只给出 14/7/**3** 个。
+    // 3 个枢轴连一个 6 点窗口都凑不出来，这时候任何「规则没过」的提示都是
+    // 误导 —— 真正的问题是样本太薄。所以先报这个。
+    // 经验值：周线要把倍数缩到日线的 1/4 左右（×0.5 / ×1 / ×1.5）。
+    if L.pvTotal < 12
+        L.note := "⚠ 枢轴仅 " + str.tostring(L.pvTotal) + " 个，阈值偏大 · 试试调到 1/4"
+    else if not na(L.activeTgt())
         L.note := "正式推演进行中"
     else if n < 5
         L.note := "枢轴不足 " + str.tostring(n) + "/5"
@@ -555,31 +564,36 @@ bool  wvBear = (hitA and LA.lastDir < 0) or (hitB and LB.lastDir < 0) or (hitC a
 if showTbl and barstate.islast
     // 三列：级别 / 阈值·命中 / **现在卡在哪一条**。第三列是重点 ——
     // 「为什么没有推演线」直接写在图上，不用再去猜。
-    var table tb = table.new(position.bottom_right, 3, 5,
+    var table tb = table.new(position.bottom_right, 4, 5,
          bgcolor = color.new(color.black, 20), border_width = 1,
          border_color = color.new(color.gray, 60))
-    table.cell(tb, 0, 0, "级别",       text_color = color.silver, text_size = size.tiny)
-    table.cell(tb, 1, 0, "阈值 · 命中", text_color = color.silver, text_size = size.tiny)
-    table.cell(tb, 2, 0, "当前状态",   text_color = color.silver, text_size = size.tiny)
+    table.cell(tb, 0, 0, "级别",      text_color = color.silver, text_size = size.tiny)
+    table.cell(tb, 1, 0, "阈值",      text_color = color.silver, text_size = size.tiny)
+    table.cell(tb, 2, 0, "枢轴·命中", text_color = color.silver, text_size = size.tiny)
+    table.cell(tb, 3, 0, "当前状态",  text_color = color.silver, text_size = size.tiny)
 
     table.cell(tb, 0, 1, "A", text_color = cA, text_size = size.tiny)
-    table.cell(tb, 1, 1, LA.on ? "ATR×" + str.tostring(mA) + " · " + str.tostring(LA.hits) : "关",
+    table.cell(tb, 1, 1, LA.on ? "ATR×" + str.tostring(mA) : "关", text_color = cA, text_size = size.tiny)
+    table.cell(tb, 2, 1, LA.on ? str.tostring(LA.pvTotal) + " · " + str.tostring(LA.hits) : "",
          text_color = cA, text_size = size.tiny)
-    table.cell(tb, 2, 1, LA.on ? LA.note : "", text_color = cA, text_size = size.tiny)
+    table.cell(tb, 3, 1, LA.on ? LA.note : "", text_color = cA, text_size = size.tiny)
 
     table.cell(tb, 0, 2, "B", text_color = cB, text_size = size.tiny)
-    table.cell(tb, 1, 2, LB.on ? "ATR×" + str.tostring(mB) + " · " + str.tostring(LB.hits) : "关",
+    table.cell(tb, 1, 2, LB.on ? "ATR×" + str.tostring(mB) : "关", text_color = cB, text_size = size.tiny)
+    table.cell(tb, 2, 2, LB.on ? str.tostring(LB.pvTotal) + " · " + str.tostring(LB.hits) : "",
          text_color = cB, text_size = size.tiny)
-    table.cell(tb, 2, 2, LB.on ? LB.note : "", text_color = cB, text_size = size.tiny)
+    table.cell(tb, 3, 2, LB.on ? LB.note : "", text_color = cB, text_size = size.tiny)
 
     table.cell(tb, 0, 3, "C", text_color = cC, text_size = size.tiny)
-    table.cell(tb, 1, 3, LC.on ? "ATR×" + str.tostring(mC) + " · " + str.tostring(LC.hits) : "关",
+    table.cell(tb, 1, 3, LC.on ? "ATR×" + str.tostring(mC) : "关", text_color = cC, text_size = size.tiny)
+    table.cell(tb, 2, 3, LC.on ? str.tostring(LC.pvTotal) + " · " + str.tostring(LC.hits) : "",
          text_color = cC, text_size = size.tiny)
-    table.cell(tb, 2, 3, LC.on ? LC.note : "", text_color = cC, text_size = size.tiny)
+    table.cell(tb, 3, 3, LC.on ? LC.note : "", text_color = cC, text_size = size.tiny)
 
     table.cell(tb, 0, 4, "⚠", text_color = color.orange, text_size = size.tiny)
-    table.cell(tb, 1, 4, "待定线每根都变", text_color = color.orange, text_size = size.tiny)
-    table.cell(tb, 2, 4, "最新一浪会重绘；加载更多历史后数浪可能整体改变",
+    table.cell(tb, 1, 4, str.tostring(bar_index + 1) + " 根", text_color = color.orange, text_size = size.tiny)
+    table.cell(tb, 2, 4, "待定线每根都变", text_color = color.orange, text_size = size.tiny)
+    table.cell(tb, 3, 4, "换周期后阈值要重调：枢轴数量取决于图上有多少根K线",
          text_color = color.orange, text_size = size.tiny)
 
 // ───────────────────────────────────────────────────────── 6. 警报

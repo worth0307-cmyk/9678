@@ -18,9 +18,12 @@
 //   （可选）浪5 超越浪3 端点 —— 关掉就允许衰竭浪
 // 斐波那契比例只做加分项：浪3 ≥ 1.618×浪1 时把那一段画粗、标 ★。
 //
-// ⚠ 重绘：已确认的枢轴不重绘（阈值一旦被收盘价突破就钉死），但**最新一浪**
-//   在当根K线走完前会反复出现/消失，而且下一个枢轴确认后整组数浪可能被一组
-//   不同的数浪取代。所有判定以收盘为准。
+// ⚠ 重绘与「拉伸时间轴后线变了」：
+//   已确认的枢轴在**同一次计算里**不重绘。但 ZigZag 是路径依赖的 —— 它从图表
+//   最早那根开始滚，往左拖加载了更多历史之后 TradingView 会整个重算，起点变了，
+//   整串枢轴就可能落在不同的位置。这不是画错，是这类算法的固有性质。
+//   本版把方向播种改成「双向跟踪、谁先反转谁定方向」，把这个漂移压到最小，
+//   但压不到零。最新一浪在当根K线走完前同样会反复出现/消失。
 // =============================================================================
 
 indicator("推动浪 1-2-3-4-5 多级别", "Impulse 1-5", overlay = true,
@@ -35,7 +38,7 @@ mB = input.float(4.0, "级别 B 阈值 = ATR ×", minval = 0.2, step = 0.5, grou
 mC = input.float(8.0, "级别 C 阈值 = ATR ×", minval = 0.2, step = 0.5, group = gZ)
 onA = input.bool(true,  "启用级别 A（最细）", group = gZ)
 onB = input.bool(true,  "启用级别 B",        group = gZ)
-onC = input.bool(true,  "启用级别 C（最粗）", group = gZ)
+onC = input.bool(false, "启用级别 C（最粗）", group = gZ)
 
 gR = "② 校验规则"
 need5 = input.bool(true, "浪5 必须超越浪3 端点", group = gR,
@@ -43,23 +46,55 @@ need5 = input.bool(true, "浪5 必须超越浪3 端点", group = gR,
                "所以做成开关：衰竭浪在艾略特里合法但少见，默认打开能少掉很多噪声数浪。")
 fibOn = input.bool(true,  "浪3 ≥ N×浪1 时加粗标 ★（仅加分）", group = gR)
 fibN  = input.float(1.618, "加分比例 N", minval = 0.5, step = 0.1, group = gR)
+maxPat = input.int(1, "每个级别保留最近几组", minval = 1, maxval = 8, group = gR,
+     tooltip = "三个级别同时开、每级留 2 组，图上就是 30 条浪线 + 3 条推演线互相压。" +
+               "默认 1 组：想看历史再往上加。")
 
 gP = "③ 推演"
-showProj = input.bool(true, "画下一段推演虚线", group = gP,
-     tooltip = "1-5 走完之后按艾略特接的是 ABC 调整，所以这条虚线画的是**调整目标**，" +
-               "不是第 6 浪。价位 = P5 回撤 (1-5 全长) × 下面那个比例。")
+showProj = input.bool(true, "画推演", group = gP,
+     tooltip = "1-5 走完之后按艾略特接的是 ABC 调整，所以推演画的是**调整目标**，不是第 6 浪。\n\n" +
+               "价位 = P5 回撤 (1-5 全长) × 下面那个比例。这是几何外推，不是预测。")
+projLast = input.bool(true, "只给每个级别最新的一组画", group = gP,
+     tooltip = "**重要**：推演的终点是 P5 之后若干根。如果那一组浪早就走完了，" +
+               "终点就落在已经发生过的历史里 —— 那不是预测，是一条画在旧K线上的斜线，" +
+               "和浪线长得一模一样，正是你截图上看不清的原因。默认只给最新一组画。")
 projRetr = input.float(0.5, "推演价位：回撤 1-5 全长的", minval = 0.05, maxval = 1.0, step = 0.05, group = gP)
 projTime = input.float(0.5, "推演耗时：1-5 跨度的",     minval = 0.1, maxval = 3.0, step = 0.1, group = gP)
+projRay  = input.bool(true, "在目标价上画一条水平射线", group = gP,
+     tooltip = "斜线只告诉你「往那边走」，水平射线才让目标价**可读**：它一直延伸到右侧，" +
+               "你能直接看出当前价离目标还有多远。")
 
-gS = "④ 显示"
-cA = input.color(#42a5f5, "级别 A 颜色", group = gS)
-cB = input.color(#ab47bc, "级别 B 颜色", group = gS)
-cC = input.color(#ffa726, "级别 C 颜色", group = gS)
-showZZ  = input.bool(false, "画出 ZigZag 骨架（调阈值时打开）", group = gS)
-showTbl = input.bool(true,  "右下角状态表",                  group = gS)
-maxPat  = input.int(2, "每个级别保留最近几组", minval = 1, maxval = 8, group = gS)
+gS = "④ 样式"
+// 注：TradingView 的「样式」标签页只收 plot/plotshape 这类输出，line/label/box
+// 这种绘图对象改不了颜色线宽 —— 所以全部放在这里，输入页第 ④ 组。
+cA = input.color(#42a5f5, "级别 A 颜色", group = gS, inline = "A")
+wA = input.int(2, "线宽", minval = 1, maxval = 6, group = gS, inline = "A")
+cB = input.color(#ab47bc, "级别 B 颜色", group = gS, inline = "B")
+wB = input.int(2, "线宽", minval = 1, maxval = 6, group = gS, inline = "B")
+cC = input.color(#ffa726, "级别 C 颜色", group = gS, inline = "C")
+wC = input.int(2, "线宽", minval = 1, maxval = 6, group = gS, inline = "C")
+starW   = input.int(2, "浪3 达标时额外加粗", minval = 0, maxval = 4, group = gS)
+lblSize = input.string("tiny", "标签大小", options = ["tiny", "small", "normal"], group = gS)
 
-atrV = nz(ta.atr(atrLen), syminfo.mintick * 10.0)
+pCol   = input.color(#ff4081, "推演线颜色", group = gS, inline = "P")
+pWidth = input.int(2, "线宽", minval = 1, maxval = 6, group = gS, inline = "P")
+pStyle = input.string("虚线", "推演线样式", options = ["虚线", "点线", "实线"], group = gS)
+
+showZZ = input.bool(false, "画出 ZigZag 骨架（调阈值时打开）", group = gS, inline = "Z")
+zzW    = input.int(1, "线宽", minval = 1, maxval = 4, group = gS, inline = "Z")
+zzT    = input.int(55, "透明度", minval = 0, maxval = 100, group = gS, inline = "Z")
+
+showTbl = input.bool(true, "右下角状态表", group = gS)
+
+// ATR 前 atrLen 根是 na。用 nz 兜底成 10 个 tick 的话，阈值近乎为零，
+// ZigZag 会在开头几根上疯狂确认枢轴 —— 那些垃圾枢轴会一路喂进形态检测，
+// 变成图左侧莫名其妙的一组浪。所以宁可等 ATR 有效再开始滚。
+atrRaw = ta.atr(atrLen)
+atrOk  = not na(atrRaw)
+atrV   = nz(atrRaw, syminfo.mintick * 10.0)
+
+szLbl = lblSize == "normal" ? size.normal : lblSize == "small" ? size.small : size.tiny
+stPrj = pStyle == "实线" ? line.style_solid : pStyle == "点线" ? line.style_dotted : line.style_dashed
 
 // ───────────────────────────────────────────────────────── 2. 枢轴序列
 
@@ -72,26 +107,33 @@ type Wave
     array<line>  segs
     array<label> lbs
     line  proj
+    line  ray
     label projLb
 
 type Lv
     string      name
     float       mult
     color       col
+    int         wid
     bool        on
-    int         dir      // +1 = 正在跟踪上升腿（找高点）, −1 = 下降腿
-    float       ext      // 当前腿的极值
+    int         dir      // +1 = 正在跟踪上升腿（找高点）, −1 = 下降腿, 0 = 还没定
+    float       ext      // 当前腿的极值（播种期 = 跟踪中的高点）
     int         extBi
+    float       ext2     // 只在播种期用：跟踪中的低点
+    int         ext2Bi
     array<Piv>  pv
     array<Wave> ws
     array<line> zz
     int         hits
 
-var Lv LA = Lv.new(name = "A", mult = mA, col = cA, on = onA, dir = 0, ext = na, extBi = na,
+var Lv LA = Lv.new(name = "A", mult = mA, col = cA, wid = wA, on = onA, dir = 0,
+     ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(), hits = 0)
-var Lv LB = Lv.new(name = "B", mult = mB, col = cB, on = onB, dir = 0, ext = na, extBi = na,
+var Lv LB = Lv.new(name = "B", mult = mB, col = cB, wid = wB, on = onB, dir = 0,
+     ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(), hits = 0)
-var Lv LC = Lv.new(name = "C", mult = mC, col = cC, on = onC, dir = 0, ext = na, extBi = na,
+var Lv LC = Lv.new(name = "C", mult = mC, col = cC, wid = wC, on = onC, dir = 0,
+     ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(), hits = 0)
 
 // ZigZag 单步。返回：本根是否**确认**了一个新枢轴。
@@ -99,10 +141,35 @@ var Lv LC = Lv.new(name = "C", mult = mC, col = cC, on = onC, dir = 0, ext = na,
 // 就不会被后来的行情抹掉（极值点本身在过去，不需要未来数据）。
 method zigzag(Lv L, float thr) =>
     bool confirmed = false
-    if na(L.dir) or L.dir == 0
-        L.dir   := 1
-        L.ext   := high
-        L.extBi := bar_index
+
+    if L.dir == 0
+        // 播种期：**同时**跟踪最高和最低，谁先反向走出 thr 谁定方向。
+        // 旧版硬性假设「第一条腿是上升腿」，那会让最早一两个枢轴系统性偏一边，
+        // 而 ZigZag 是路径依赖的 —— 一个偏掉的起点能把后面整串都挪位。
+        if na(L.ext)
+            L.ext    := high
+            L.extBi  := bar_index
+            L.ext2   := low
+            L.ext2Bi := bar_index
+        else
+            if high > L.ext
+                L.ext   := high
+                L.extBi := bar_index
+            if low < L.ext2
+                L.ext2   := low
+                L.ext2Bi := bar_index
+            if close < L.ext - thr
+                array.push(L.pv, Piv.new(L.ext, L.extBi, true))
+                confirmed := true
+                L.dir   := -1
+                L.ext   := low
+                L.extBi := bar_index
+            else if close > L.ext2 + thr
+                array.push(L.pv, Piv.new(L.ext2, L.ext2Bi, false))
+                confirmed := true
+                L.dir   := 1
+                L.ext   := high
+                L.extBi := bar_index
     else if L.dir == 1
         if high > L.ext
             L.ext   := high
@@ -132,12 +199,18 @@ method zigzag(Lv L, float thr) =>
         Piv q0 = array.get(L.pv, array.size(L.pv) - 2)
         Piv q1 = array.get(L.pv, array.size(L.pv) - 1)
         array.push(L.zz, line.new(q0.bi, q0.price, q1.bi, q1.price, xloc = xloc.bar_index,
-             color = color.new(L.col, 55), width = 1))
+             color = color.new(L.col, zzT), width = zzW))
         if array.size(L.zz) > 40
             line.delete(array.shift(L.zz))
     confirmed
 
 // ───────────────────────────────────────────────────────── 3. 形态对象
+
+// 只抹掉推演部分，浪线和 (1)..(5) 标签留着
+delProj(Wave w) =>
+    line.delete(w.proj)
+    line.delete(w.ray)
+    label.delete(w.projLb)
 
 delWave(Wave w) =>
     if array.size(w.segs) > 0
@@ -146,8 +219,7 @@ delWave(Wave w) =>
     if array.size(w.lbs) > 0
         for i = 0 to array.size(w.lbs) - 1
             label.delete(array.get(w.lbs, i))
-    line.delete(w.proj)
-    label.delete(w.projLb)
+    delProj(w)
 
 // ───────────────────────────────────────────────────────── 4. 检测（换形态只改这一节）
 
@@ -185,27 +257,33 @@ method detect(Lv L) =>
             found := true
             L.hits := L.hits + 1
             bool star = fibOn and l3 >= fibN * l1
+            int  wThick = star ? L.wid + starW : L.wid
+
+            // 只留最新一组推演：上一组的斜线/射线/标签在这里抹掉，
+            // 浪线本身保留（那是已经发生过的事实，不是预测）
+            if projLast and array.size(L.ws) > 0
+                delProj(array.get(L.ws, array.size(L.ws) - 1))
 
             Wave w = Wave.new(segs = array.new<line>(), lbs = array.new<label>())
 
             // P0→P5 连线，浪3 达标时加粗
             array.push(w.segs, line.new(p0.bi, p0.price, p1.bi, p1.price,
-                 xloc = xloc.bar_index, color = L.col, width = 2))
+                 xloc = xloc.bar_index, color = L.col, width = L.wid))
             array.push(w.segs, line.new(p1.bi, p1.price, p2.bi, p2.price,
-                 xloc = xloc.bar_index, color = L.col, width = 2))
+                 xloc = xloc.bar_index, color = L.col, width = L.wid))
             array.push(w.segs, line.new(p2.bi, p2.price, p3.bi, p3.price,
-                 xloc = xloc.bar_index, color = L.col, width = star ? 4 : 2))
+                 xloc = xloc.bar_index, color = L.col, width = wThick))
             array.push(w.segs, line.new(p3.bi, p3.price, p4.bi, p4.price,
-                 xloc = xloc.bar_index, color = L.col, width = 2))
+                 xloc = xloc.bar_index, color = L.col, width = L.wid))
             array.push(w.segs, line.new(p4.bi, p4.price, p5.bi, p5.price,
-                 xloc = xloc.bar_index, color = L.col, width = 2))
+                 xloc = xloc.bar_index, color = L.col, width = L.wid))
 
             for k = 1 to 5
                 Piv q = array.get(L.pv, n - 6 + k)
                 string txt = "(" + str.tostring(k) + ")" + (k == 3 and star ? " ★" : "")
                 array.push(w.lbs, label.new(q.bi, q.price, txt, xloc = xloc.bar_index,
                      style = q.isHigh ? label.style_label_down : label.style_label_up,
-                     color = color.new(L.col, 25), textcolor = color.white, size = size.tiny))
+                     color = color.new(L.col, 25), textcolor = color.white, size = szLbl))
 
             // 推演：1-5 走完接 ABC 调整，按回撤比例给一个目标价 + 大致耗时
             if showProj
@@ -215,13 +293,24 @@ method detect(Lv L) =>
                 int tgtBi = math.min(p5.bi + dbars, bar_index + 450)
                 float full = math.abs(p5.price - p0.price)
                 float tgt  = bull ? p5.price - full * projRetr : p5.price + full * projRetr
+
+                // 斜线：从 P5 指向目标，用**自己的颜色**（和三个级别都不同），
+                // 否则它和浪线一个色一个形状，在图上根本认不出来
                 w.proj := line.new(p5.bi, p5.price, tgtBi, tgt, xloc = xloc.bar_index,
-                     color = color.new(L.col, 25), style = line.style_dashed, width = 2)
+                     color = pCol, style = stPrj, width = pWidth)
+
+                // 水平射线：斜线只说「往那边走」，这条才让目标价可读
+                if projRay
+                    w.ray := line.new(p5.bi, tgt, bar_index + 1, tgt, xloc = xloc.bar_index,
+                         color = color.new(pCol, 45), style = line.style_dotted,
+                         width = 1, extend = extend.right)
+
                 w.projLb := label.new(tgtBi, tgt,
-                     L.name + " 推演 " + str.tostring(tgt, format.mintick),
+                     L.name + (bull ? " ↓调整 " : " ↑调整 ") + str.tostring(tgt, format.mintick)
+                     + "  (" + str.tostring(projRetr) + ")",
                      xloc = xloc.bar_index,
                      style = bull ? label.style_label_up : label.style_label_down,
-                     color = color.new(L.col, 55), textcolor = color.white, size = size.tiny)
+                     color = color.new(pCol, 30), textcolor = color.white, size = szLbl)
 
             array.push(L.ws, w)
             if array.size(L.ws) > maxPat
@@ -230,26 +319,29 @@ method detect(Lv L) =>
 
 // ───────────────────────────────────────────────────────── 5. 每根维护
 
-// 倍数是 input，可能被改；每根同步回对象，免得改参数后不生效
+// 输入可能被改；每根同步回对象，免得改了参数不生效
 LA.mult := mA
 LA.col  := cA
+LA.wid  := wA
 LA.on   := onA
 LB.mult := mB
 LB.col  := cB
+LB.wid  := wB
 LB.on   := onB
 LC.mult := mC
 LC.col  := cC
+LC.wid  := wC
 LC.on   := onC
 
 bool hitA = false
 bool hitB = false
 bool hitC = false
 
-if LA.on and LA.zigzag(atrV * LA.mult)
+if LA.on and atrOk and LA.zigzag(atrV * LA.mult)
     hitA := LA.detect()
-if LB.on and LB.zigzag(atrV * LB.mult)
+if LB.on and atrOk and LB.zigzag(atrV * LB.mult)
     hitB := LB.detect()
-if LC.on and LC.zigzag(atrV * LC.mult)
+if LC.on and atrOk and LC.zigzag(atrV * LC.mult)
     hitC := LC.detect()
 
 if showTbl and barstate.islast
@@ -268,7 +360,8 @@ if showTbl and barstate.islast
     table.cell(tb, 1, 3, (LC.on ? "ATR×" + str.tostring(mC) + "  ·  " + str.tostring(LC.hits) : "关"),
          text_color = cC, text_size = size.tiny)
     table.cell(tb, 0, 4, "⚠", text_color = color.orange, text_size = size.tiny)
-    table.cell(tb, 1, 4, "最新一浪会随行情重绘", text_color = color.orange, text_size = size.tiny)
+    table.cell(tb, 1, 4, "最新一浪会重绘；加载更多历史后数浪可能整体改变",
+         text_color = color.orange, text_size = size.tiny)
 
 // ───────────────────────────────────────────────────────── 6. 警报
 

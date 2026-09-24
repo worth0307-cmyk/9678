@@ -124,7 +124,10 @@ showZZ  = input.bool(false, "画出 ZigZag 骨架（调阈值时打开）", grou
 zzW     = input.int(1, "线宽", minval = 1, maxval = 4, group = gS, inline = "Z")
 zzT     = input.int(55, "透明度", minval = 0, maxval = 100, group = gS, inline = "Z")
 showTbl = input.bool(true, "右下角状态表", group = gS, inline = "TB")
-tblSz   = input.string("中", "字号", options = ["小", "中", "大", "特大"], group = gS, inline = "TB")
+tblSz   = input.string("极小", "字号", options = ["极小", "小", "中", "大"], group = gS, inline = "TB",
+     tooltip = "默认极小，不占图。**鼠标移到状态表任意一行上，会弹出这一行的完整明细**" +
+               "（正常字号）：当前位置、推演路径每一段的价位 / 涨跌幅 / 大约几根后到、腿的速度。\n\n" +
+               "Pine 指标没法响应鼠标点击，所以做不成「点一下放大」；悬停浮窗是最接近的原生功能。")
 
 // ATR 前 atrLen 根是 na。兜底成 10 个 tick 会让阈值近乎为零、开头几根疯狂确认枢轴，
 // 所以宁可等 ATR 有效再开始滚。
@@ -133,7 +136,7 @@ atrOk  = not na(atrRaw)
 atrV   = nz(atrRaw, syminfo.mintick * 10.0)
 
 szLbl = lblSize == "normal" ? size.normal : lblSize == "small" ? size.small : size.tiny
-szT   = tblSz == "特大" ? size.huge : tblSz == "大" ? size.large : tblSz == "小" ? size.small : size.normal
+szT   = tblSz == "大" ? size.large : tblSz == "中" ? size.normal : tblSz == "小" ? size.small : size.tiny
 stPrj = pStyle == "实线" ? line.style_solid : pStyle == "点线" ? line.style_dotted : line.style_dashed
 
 // ───────────────────────────────────────────────────────── 2. 枢轴序列
@@ -176,22 +179,23 @@ type Lv
     int          sP0      // 场景推演的起点枢轴所在 bar（跨级别去重用）
     string       note     // 状态表：当前位置
     string       note2    // 状态表：推演终点
+    string       tip      // 状态表：悬停浮窗里的完整推演明细
 
 var Lv LA = Lv.new(name = "细", mult = useA, col = cA, wid = wA, on = onA, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
-     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "")
+     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "")
 var Lv LB = Lv.new(name = "中", mult = useB, col = cB, wid = wB, on = onB, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
-     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "")
+     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "")
 var Lv LC = Lv.new(name = "粗", mult = useC, col = cC, wid = wC, on = onC, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
-     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "")
+     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "")
 
 // ZigZag 单步。返回：本根是否**确认**了一个新枢轴。
 // 确认条件是收盘价从当前腿的极值反向走出 thr —— 收盘才算，所以枢轴一旦确认
@@ -500,9 +504,11 @@ method scenario(Lv L) =>
     L.sP0   := -1
     L.note  := ""
     L.note2 := ""
+    L.tip   := ""
     int n = array.size(L.pv)
     if L.dir == 0 or n < 2
         L.note := "枢轴不足（" + str.tostring(n) + " 个）"
+        L.tip  := "图上确认的枢轴还不到 2 个，没法判断位置。刚加载、或者阈值太大时会这样。"
     else
         // ── 1. 位置：从最深的解读往浅试，取第一个成立的 —— 能解释最多枢轴的那个。
         //       k = 0（新的浪1 正在走）永远成立，所以一定有结果。
@@ -657,6 +663,23 @@ method scenario(Lv L) =>
         L.note2 := scName(array.get(pw, np - 1)) + " " + str.tostring(yEnd, format.mintick)
              + " (" + (chgEnd >= 0 ? "+" : "") + str.tostring(chgEnd, "#.#") + "%)"
 
+        // ── 7. 悬停明细：表里的字很小，鼠标移到这一行上弹出的浮窗是正常字号
+        string tp = "当前位置：" + pos + "\n\n推演路径（从现在起）："
+        if done
+            tp := tp + "\n  " + scName(kk) + "?   " + str.tostring(L.ext, format.mintick)
+                 + "   越过目标、已回头，暂按在这里走完"
+        else
+            tp := tp + "\n  现在   " + str.tostring(close, format.mintick)
+        for hi = 1 to np - 1
+            float yv = s * array.get(px, hi)
+            float cv = (yv / close - 1.0) * 100.0
+            tp := tp + "\n  " + scName(array.get(pw, hi)) + "   " + str.tostring(yv, format.mintick)
+                 + "   " + (cv >= 0 ? "+" : "") + str.tostring(cv, "#.#") + "%"
+                 + "   约 " + str.tostring(array.get(pt, hi) - bar_index) + " 根后"
+        tp := tp + "\n\n角度依据 · 实测速度：推动腿 " + str.tostring(vImp, format.mintick)
+             + " / 根，调整腿 " + str.tostring(vCor, format.mintick) + " / 根"
+        L.tip := tp
+
 // ───────────────────────────────────────────────────────── 6. 每根维护
 
 // 输入可能被改；每根同步回对象，免得改了参数不生效
@@ -699,16 +722,22 @@ if showProj and barstate.islast
             LB.clearScen()
             LB.note := "同「" + LA.name + "」的场景，不重复画"
             LB.note2 := ""
+            LB.tip := "和「" + LA.name + "」选中了同一个起点和位置，推演路径完全一样，"
+                 + "图上只画「" + LA.name + "」那条。\n\n" + LA.tip
     if LC.on
         LC.scenario()
         if LA.on and LC.sK >= 0 and LC.sK == LA.sK and LC.sP0 == LA.sP0
             LC.clearScen()
             LC.note := "同「" + LA.name + "」的场景，不重复画"
             LC.note2 := ""
+            LC.tip := "和「" + LA.name + "」选中了同一个起点和位置，推演路径完全一样，"
+                 + "图上只画「" + LA.name + "」那条。\n\n" + LA.tip
         else if LB.on and LC.sK >= 0 and LC.sK == LB.sK and LC.sP0 == LB.sP0
             LC.clearScen()
             LC.note := "同「" + LB.name + "」的场景，不重复画"
             LC.note2 := ""
+            LC.tip := "和「" + LB.name + "」选中了同一个起点和位置，推演路径完全一样，"
+                 + "图上只画「" + LB.name + "」那条。\n\n" + LB.tip
 
 float tgtA = LA.on ? LA.activeTgt() : na
 float tgtB = LB.on ? LB.activeTgt() : na
@@ -716,36 +745,60 @@ float tgtC = LC.on ? LC.activeTgt() : na
 bool  wvBull = (hitA and LA.lastDir > 0) or (hitB and LB.lastDir > 0) or (hitC and LC.lastDir > 0)
 bool  wvBear = (hitA and LA.lastDir < 0) or (hitB and LB.lastDir < 0) or (hitC and LC.lastDir < 0)
 
+// 一行里每个格子挂同一段悬停明细 —— 鼠标移到这一行哪里都能看到
 method tblRow(Lv L, table tb, int r, float m) =>
-    table.cell(tb, 0, r, L.name, text_color = L.col, text_size = szT)
-    table.cell(tb, 1, r, L.on ? "ATR×" + str.tostring(m) : "关", text_color = L.col, text_size = szT)
+    string tp = "级别「" + L.name + "」   ATR×" + str.tostring(m) + (tfAuto ? "（按周期自动）" : "（手动）")
+         + "\n已确认枢轴 " + str.tostring(L.pvTotal) + " 个 · 完整 1-5 共 " + str.tostring(L.hits) + " 组"
+    if not L.on
+        tp := "级别「" + L.name + "」已关闭（输入页 ① 组打开）"
+    else if not showProj
+        tp := tp + "\n\n场景推演已关闭（输入页 ③ 组打开）"
+    else
+        tp := tp + "\n\n" + L.tip
+    table.cell(tb, 0, r, L.name, text_color = L.col, text_size = szT, tooltip = tp)
+    table.cell(tb, 1, r, L.on ? "ATR×" + str.tostring(m) : "关", text_color = L.col, text_size = szT,
+         tooltip = tp)
     table.cell(tb, 2, r, L.on ? str.tostring(L.pvTotal) + " · " + str.tostring(L.hits) : "",
-         text_color = L.col, text_size = szT)
+         text_color = L.col, text_size = szT, tooltip = tp)
     table.cell(tb, 3, r, L.on ? (showProj ? L.note : "推演已关闭") : "",
-         text_color = L.col, text_size = szT, text_halign = text.align_left)
+         text_color = L.col, text_size = szT, text_halign = text.align_left, tooltip = tp)
     table.cell(tb, 4, r, L.on and showProj ? L.note2 : "",
-         text_color = L.col, text_size = szT, text_halign = text.align_left)
+         text_color = L.col, text_size = szT, text_halign = text.align_left, tooltip = tp)
 
 if showTbl and barstate.islast
     var table tb = table.new(position.bottom_right, 5, 5,
          bgcolor = color.new(color.black, 15), border_width = 1,
          border_color = color.new(color.gray, 60),
          frame_width = 1, frame_color = color.new(color.gray, 40))
-    table.cell(tb, 0, 0, "级别",      text_color = color.silver, text_size = szT)
-    table.cell(tb, 1, 0, tfAuto ? "阈值(自动)" : "阈值(手动)", text_color = color.silver, text_size = szT)
-    table.cell(tb, 2, 0, "枢轴·命中", text_color = color.silver, text_size = szT)
-    table.cell(tb, 3, 0, "当前位置",  text_color = color.silver, text_size = szT)
-    table.cell(tb, 4, 0, "推演终点",  text_color = color.silver, text_size = szT)
+    string hTip = "鼠标移到下面任意一行上，会弹出那一行的完整明细。\n\n"
+         + "级别：细 / 中 / 粗\n"
+         + "阈值：实际生效的 ATR 倍数\n"
+         + "枢轴·命中：累计确认的枢轴数 · 完整 1-5 组数\n"
+         + "当前位置：现在在走哪一浪\n"
+         + "推演终点：推演最后一段的终点价和离现价多少 %\n\n"
+         + "字号在输入页 ④ 组「右下角状态表 · 字号」里改。"
+    table.cell(tb, 0, 0, "级别",      text_color = color.silver, text_size = szT, tooltip = hTip)
+    table.cell(tb, 1, 0, tfAuto ? "阈值(自动)" : "阈值(手动)", text_color = color.silver, text_size = szT,
+         tooltip = hTip)
+    table.cell(tb, 2, 0, "枢轴·命中", text_color = color.silver, text_size = szT, tooltip = hTip)
+    table.cell(tb, 3, 0, "当前位置",  text_color = color.silver, text_size = szT, tooltip = hTip)
+    table.cell(tb, 4, 0, "推演终点",  text_color = color.silver, text_size = szT, tooltip = hTip)
     LA.tblRow(tb, 1, useA)
     LB.tblRow(tb, 2, useB)
     LC.tblRow(tb, 3, useC)
-    table.cell(tb, 0, 4, "⚠", text_color = color.orange, text_size = szT)
-    table.cell(tb, 1, 4, str.tostring(bar_index + 1) + " 根", text_color = color.orange, text_size = szT)
-    table.cell(tb, 2, 4, "每根重算", text_color = color.orange, text_size = szT)
+    string fTip = "图上共 " + str.tostring(bar_index + 1) + " 根K线。\n\n"
+         + "「?」= 这一浪已越过斐波那契目标、价格也已回头，暂按「在极值处走完」往下推。"
+         + "ZigZag 还没确认反转，所以这只是假设。\n\n"
+         + "推演只在最后一根上画，每来一根新K线都会重新判断位置、重画路径。\n\n"
+         + "推演是规则的机械推论，不是信号。"
+    table.cell(tb, 0, 4, "⚠", text_color = color.orange, text_size = szT, tooltip = fTip)
+    table.cell(tb, 1, 4, str.tostring(bar_index + 1) + " 根", text_color = color.orange, text_size = szT,
+         tooltip = fTip)
+    table.cell(tb, 2, 4, "悬停看明细", text_color = color.orange, text_size = szT, tooltip = fTip)
     table.cell(tb, 3, 4, "? = 越过目标已回头，暂按走完", text_color = color.orange, text_size = szT,
-         text_halign = text.align_left)
+         text_halign = text.align_left, tooltip = fTip)
     table.cell(tb, 4, 4, "推演是推论，不是信号", text_color = color.orange, text_size = szT,
-         text_halign = text.align_left)
+         text_halign = text.align_left, tooltip = fTip)
 
 // ───────────────────────────────────────────────────────── 7. 警报
 

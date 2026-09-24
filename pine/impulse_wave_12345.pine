@@ -118,6 +118,12 @@ cC = input.color(#ffa726, "级别「粗」颜色", group = gS, inline = "C")
 wC = input.int(2, "线宽", minval = 1, maxval = 6, group = gS, inline = "C")
 starW   = input.int(2, "浪3 达标时额外加粗", minval = 0, maxval = 4, group = gS)
 lblSize = input.string("tiny", "图上标签大小", options = ["tiny", "small", "normal"], group = gS)
+projLbl = input.string("浪名", "推演标签内容", options = ["浪名", "浪名 + 价位 + %"], group = gS,
+     tooltip = "默认只写浪名（A、(3) 这样），不挡K线。**鼠标移到图上任何一个标签上**，会弹出正常字号的详情：\n" +
+               "  推演点：终点价、离现价多少 %、大约几根后到（估算日期）、" +
+               "这个价位怎么算出来的（高度依据）、这一段的斜率和同类腿的实测速度（角度依据）\n" +
+               "  已确认的 (1)..(5)：这一浪涨跌多少、走了几根、和浪1 的比例\n\n" +
+               "Pine 指标没法响应鼠标点击，悬停浮窗是最接近「点一下放大」的原生功能。")
 pWidth  = input.int(2, "推演线 线宽", minval = 1, maxval = 6, group = gS, inline = "P")
 pStyle  = input.string("虚线", "样式", options = ["虚线", "点线", "实线"], group = gS, inline = "P")
 showZZ  = input.bool(false, "画出 ZigZag 骨架（调阈值时打开）", group = gS, inline = "Z")
@@ -341,11 +347,28 @@ method detect(Lv L) =>
                  xloc = xloc.bar_index, color = L.col, width = L.wid))
 
             for k = 1 to 5
-                Piv q = array.get(L.pv, n - 6 + k)
+                Piv q  = array.get(L.pv, n - 6 + k)
+                Piv qp = array.get(L.pv, n - 7 + k)
                 string txt = "(" + str.tostring(k) + ")" + (k == 3 and star ? " ★" : "")
+                float dW = q.price - qp.price
+                string rel = ""
+                if k == 2
+                    rel := "回撤浪1 的 " + str.tostring(math.abs(dW) / l1, "#.###")
+                else if k == 3
+                    rel := "= " + str.tostring(l3 / l1, "#.##") + " × 浪1" + (star ? "  ★ 达到加分比例" : "")
+                else if k == 4
+                    rel := "回撤浪3 的 " + str.tostring(math.abs(dW) / l3, "#.###")
+                else if k == 5
+                    rel := "= " + str.tostring(l5 / l1, "#.##") + " × 浪1"
+                string tipW = "级别「" + L.name + "」 · 已确认的推动浪 · 浪" + str.tostring(k)
+                     + "\n终点 " + str.tostring(q.price, format.mintick)
+                     + "\n这一浪 " + (dW >= 0 ? "+" : "") + str.tostring(dW, format.mintick)
+                     + "（" + (dW >= 0 ? "+" : "") + str.tostring(dW / qp.price * 100, "#.#") + "%）/ "
+                     + str.tostring(q.bi - qp.bi) + " 根"
+                     + (rel != "" ? "\n" + rel : "")
                 array.push(w.lbs, label.new(q.bi, q.price, txt, xloc = xloc.bar_index,
                      style = q.isHigh ? label.style_label_down : label.style_label_up,
-                     color = color.new(L.col, 25), textcolor = color.white, size = szLbl))
+                     color = color.new(L.col, 25), textcolor = color.white, size = szLbl, tooltip = tipW))
 
             array.push(L.ws, w)
             if array.size(L.ws) > maxPat
@@ -448,44 +471,74 @@ scValid(Lv L, int k) =>
                 ok := false
     ok
 
-// 第 j 段终点的斐波那契目标（归一化价格）。ext = true 时取下一档延长目标。
+// 第 j 段终点的斐波那契目标（归一化价格）和它的依据。ext = true 时取下一档延长目标。
+// 依据里写的是**实际起作用**的那条规则 —— 夹紧没触发就不提。
 scTgt(array<float> E, float x0, int j, bool ext, float eps) =>
     float e0 = array.get(E, 0)
     float L1 = na(e0) ? na : e0 - x0
     float t = na
+    string why = ""
     if j == 1
-        t := math.max(e0 - (ext ? 0.786 : ret2) * L1, x0 + eps)
+        float r = ext ? 0.786 : ret2
+        t := math.max(e0 - r * L1, x0 + eps)
+        why := "浪2 回撤浪1 的 " + str.tostring(r)
     else if j == 2
-        t := math.max(array.get(E, 1) + (fib3 + (ext ? 1.0 : 0.0)) * L1, e0 + eps)
+        float r = fib3 + (ext ? 1.0 : 0.0)
+        t := math.max(array.get(E, 1) + r * L1, e0 + eps)
+        why := "浪3 = " + str.tostring(r) + " × 浪1，从浪2 终点量起"
     else if j == 3
+        float r = ext ? 0.5 : ret4
         float l3a = array.get(E, 2) - array.get(E, 1)
-        t := math.max(array.get(E, 2) - (ext ? 0.5 : ret4) * l3a, e0 - ovTol * L1 + eps)
+        t := array.get(E, 2) - r * l3a
+        why := "浪4 回撤浪3 的 " + str.tostring(r)
+        float floor4 = e0 - ovTol * L1 + eps
+        if t < floor4
+            t := floor4
+            why := why + "；会进浪1 区间，被抬到浪1 终点之外"
     else if j == 4
+        float r = fib5 + (ext ? 0.618 : 0.0)
         float l3b = array.get(E, 2) - array.get(E, 1)
-        t := array.get(E, 3) + (fib5 + (ext ? 0.618 : 0.0)) * L1
-        // 浪3 延长时「浪5 = 浪1」可能过不了浪3 → 改用「浪5 = 0.618 × (浪1 起点 → 浪3 终点)」
+        t := array.get(E, 3) + r * L1
+        why := "浪5 = " + str.tostring(r) + " × 浪1，从浪4 终点量起"
         if t <= array.get(E, 2)
             t := array.get(E, 3) + 0.618 * (array.get(E, 2) - x0)
-        if l3b < L1                                   // 浪3 比浪1 短 → 浪5 不能比浪3 长
-            t := math.min(t, array.get(E, 3) + l3b)
-        if need5                                      // 浪5 越过浪3
-            t := math.max(t, array.get(E, 2) + eps)
+            why := "浪3 延长，「浪5 = 浪1」过不了浪3 → 改用 浪5 = 0.618 × (浪1 起点 → 浪3 终点)"
+        if l3b < L1 and t > array.get(E, 3) + l3b
+            t := array.get(E, 3) + l3b
+            why := why + "；浪3 比浪1 短，浪5 不能比浪3 长（否则浪3 成了最短）"
+        if need5 and t < array.get(E, 2) + eps
+            t := array.get(E, 2) + eps
+            why := why + "；被抬到刚好越过浪3 终点"
     else if j == 5
         // ABC 合计回撤 = projRetr × 推动浪；B 回撤 A 的 retB，C = A
         // → 净回撤 = A − retB·A + A = (2 − retB)·A
         float a = projRetr * (array.get(E, 4) - x0) / (2.0 - retB)
         t := math.max(array.get(E, 4) - a * (ext ? 1.618 : 1.0), x0 + eps)
+        why := "ABC 合计回撤推动浪的 " + str.tostring(projRetr) + "；按锯齿形分配 A = 合计 ÷ (2 − "
+             + str.tostring(retB) + ")" + (ext ? "，再 × 1.618 延长" : "")
     else if j == 6
+        float r = ext ? 0.786 : retB
         float aB = array.get(E, 4) - array.get(E, 5)
-        t := math.min(array.get(E, 5) + (ext ? 0.786 : retB) * aB, array.get(E, 4) - eps)
+        t := array.get(E, 5) + r * aB
+        why := "B 回撤 A 的 " + str.tostring(r)
+        if t > array.get(E, 4) - eps
+            t := array.get(E, 4) - eps
+            why := why + "；被压在浪5 终点之下"
     else if j == 7
+        float r = ext ? 1.618 : 1.0
         float aC = array.get(E, 4) - array.get(E, 5)
-        t := math.max(array.get(E, 6) - (ext ? 1.618 : 1.0) * aC, x0 + eps)
+        t := array.get(E, 6) - r * aC
+        why := "C = " + str.tostring(r) + " × A，从 B 终点量起"
+        if t < x0 + eps
+            t := x0 + eps
+            why := why + "；被抬到推动浪起点之上"
     else if j == 8
-        t := array.get(E, 7) + L1                      // 下一轮浪1 ≈ 上一轮浪1
+        t := array.get(E, 7) + L1
+        why := "下一轮浪1：假设和上一轮浪1 一样长（没有更好的参照）"
     else if j == 9
         t := array.get(E, 8) - ret2 * L1
-    t
+        why := "下一轮浪2 回撤浪1 的 " + str.tostring(ret2)
+    [t, why]
 
 method clearScen(Lv L) =>
     if array.size(L.sL) > 0
@@ -533,21 +586,37 @@ method scenario(Lv L) =>
         bool running = bar_index - L.extBi <= 1     // 极值就在最近两根 → 这一段还在走
         bool done = false
         bool extd = false
+        array<string> W = array.new<string>(10, "")  // 每个点的高度依据，悬停浮窗用
         for j = kk to 9
-            float t = j == 0 ? xe : scTgt(E, x0, j, false, eps)
+            float t = xe
+            string why = "新的浪1：没有更早的参照，假设在当前极值处走完"
+            if j > 0
+                [t0, w0] = scTgt(E, x0, j, false, eps)
+                t := t0
+                why := w0
             if j == kk
                 bool up = j % 2 == 0
                 bool beyond = up ? xe >= t : xe <= t
                 if beyond and running and j > 0
                     // 越过目标、还在走 → 按延长浪取下一档
-                    t := scTgt(E, x0, j, true, eps)
+                    float tOrig = t
+                    [t1, w1] = scTgt(E, x0, j, true, eps)
+                    t := t1
                     extd := true
+                    why := "越过原目标 " + str.tostring(s * tOrig, format.mintick) + "、还在走 → 取延长档：" + w1
                     beyond := up ? xe >= t : xe <= t
-                // 越过目标、已回头 → 暂按这一段在极值处走完
+                if beyond and j > 0
+                    // 越过目标、已回头 → 暂按这一段在极值处走完
+                    why := "实际已走到 " + str.tostring(L.ext, format.mintick)
+                         + (extd ? "，连延长档 " : "，越过目标 ") + str.tostring(s * t, format.mintick)
+                         + (extd ? " 都越过了" : " 之后已回头") + " → 暂按在这里走完。原目标：" + why
+                else if not beyond
+                    why := why + "。正在走，目前走到 " + str.tostring(L.ext, format.mintick)
                 array.set(E, j, beyond ? xe : t)
                 done := beyond
             else
                 array.set(E, j, t)
+            array.set(W, j, why)
 
         // ── 3. 角度：同类腿的实测速度。本组走完的腿各一票，本级别近 10 条腿的中位数一票
         array<float> vi = array.new<float>()
@@ -623,11 +692,16 @@ method scenario(Lv L) =>
 
         // ── 5. 画
         color c = L.col
+        bool fullLbl = projLbl != "浪名"
         if done
-            array.push(L.sB, label.new(L.extBi, L.ext, L.name + " " + scName(kk) + "?",
+            string tipD = "级别「" + L.name + "」 · " + scName(kk) + "?\n\n" + array.get(W, kk)
+                 + "\n\nZigZag 还没确认反转（反向还没走出 ATR×" + str.tostring(L.mult)
+                 + "），所以这是假设：如果这一浪其实还在延长，下一根会重算。"
+            array.push(L.sB, label.new(L.extBi, L.ext,
+                 (fullLbl ? L.name + " " : "") + scName(kk) + "?",
                  xloc = xloc.bar_index,
                  style = (kk % 2 == 0) == bull ? label.style_label_down : label.style_label_up,
-                 color = color.new(c, 55), textcolor = color.white, size = szLbl))
+                 color = color.new(c, 55), textcolor = color.white, size = szLbl, tooltip = tipD))
         for di = 1 to np - 1
             int wj = array.get(pw, di)
             float y0 = s * array.get(px, di - 1)
@@ -635,12 +709,29 @@ method scenario(Lv L) =>
             array.push(L.sL, line.new(array.get(pt, di - 1), y0, array.get(pt, di), y1,
                  xloc = xloc.bar_index, color = c, style = stPrj, width = pWidth))
             float chg = (y1 / close - 1.0) * 100.0
-            array.push(L.sB, label.new(array.get(pt, di), y1,
-                 L.name + " " + scName(wj) + "  " + str.tostring(y1, format.mintick)
-                 + "  " + (chg >= 0 ? "+" : "") + str.tostring(chg, "#.#") + "%",
+            string chgS = (chg >= 0 ? "+" : "") + str.tostring(chg, "#.#") + "%"
+            // 悬停浮窗：终点、离现价、大约何时、高度依据、角度依据
+            int ahead = array.get(pt, di) - bar_index
+            string when = "约 " + str.tostring(ahead) + " 根后 ≈ "
+                 + str.format_time(time + ahead * tfSec * 1000, tfSec >= 86400 ? "yyyy-MM-dd" : "yyyy-MM-dd HH:mm",
+                 syminfo.timezone) + "（按连续交易估算）"
+            int dBars = math.max(1, array.get(pt, di) - array.get(pt, di - 1))
+            float dPx = y1 - y0
+            string tipP = "级别「" + L.name + "」 · 推演第 " + str.tostring(di) + " 段 · " + scName(wj)
+                 + "\n终点 " + str.tostring(y1, format.mintick) + "   离现价 " + chgS
+                 + "\n" + when
+                 + "\n\n高度：" + array.get(W, wj)
+                 + "\n\n角度：这一段 " + (dPx >= 0 ? "+" : "") + str.tostring(dPx, format.mintick)
+                 + " / " + str.tostring(dBars) + " 根 = " + str.tostring(dPx / dBars, format.mintick) + " / 根"
+                 + "\n（" + (scImp(wj) ? "推动" : "调整") + "腿实测速度 "
+                 + str.tostring(scImp(wj) ? vImp : vCor, format.mintick) + " / 根）"
+            string lblTxt = scName(wj)
+            if fullLbl
+                lblTxt := L.name + " " + scName(wj) + "  " + str.tostring(y1, format.mintick) + "  " + chgS
+            array.push(L.sB, label.new(array.get(pt, di), y1, lblTxt,
                  xloc = xloc.bar_index,
                  style = (wj % 2 == 0) == bull ? label.style_label_down : label.style_label_up,
-                 color = color.new(c, 25), textcolor = color.white, size = szLbl))
+                 color = color.new(c, 25), textcolor = color.white, size = szLbl, tooltip = tipP))
         float yEnd = s * array.get(px, np - 1)
         if projRay
             L.sRay := line.new(bar_index, yEnd, bar_index + 1, yEnd, xloc = xloc.bar_index,
@@ -649,7 +740,7 @@ method scenario(Lv L) =>
         // ── 6. 状态表文字
         L.sK  := kk
         L.sP0 := q0.bi
-        string pos = scName(kk) + (done ? "? 越过目标·已回头" : extd ? " 延长中" : " 进行中")
+        string pos = scName(kk) + (done ? (extd ? "? 越过延长档" : "? 越过目标·已回头") : extd ? " 延长中" : " 进行中")
         // 浪2 回撤过深的计数很脆弱（合法，但离作废只差一点），直说
         float l1v = array.get(E, 0) - x0
         if (kk >= 2 or (kk == 1 and done)) and l1v > 0

@@ -616,6 +616,7 @@ section[id]{ scroll-margin-top:16px; }
 <line x1="570.3" x2="622.2" y1="252.8" y2="252.8" stroke="#ab47bc" stroke-width="1.5" opacity="1.0"/>
 <polygon points="564.3,118.6 576.3,118.6 570.3,108.6" fill="#26a69a"/>
 <polyline points="561.6,72.1 590.5,136.2 604.9,89.5 622.2,135.1" fill="none" stroke="#42a5f5" stroke-width="2" opacity="0.65" stroke-linejoin="round"/>
+<polyline points="622.2,135.1 622.2,131.5" fill="none" stroke="#42a5f5" stroke-width="1" opacity="0.65" stroke-linejoin="round"/>
 <rect x="553.5" y="48.6" width="16.3" height="17.5" rx="3" fill="#42a5f5" opacity="0.45"/>
 <polygon points="557.6,66.1 565.6,66.1 561.6,71.1" fill="#42a5f5" opacity="0.45"/>
 <text x="561.6" y="61.1" font-size="10.5" fill="#ffffff" text-anchor="middle">0</text>
@@ -626,6 +627,7 @@ section[id]{ scroll-margin-top:16px; }
 <polygon points="600.9,83.5 608.9,83.5 604.9,88.5" fill="#42a5f5" opacity="0.45"/>
 <text x="604.9" y="78.5" font-size="10.5" fill="#ffffff" text-anchor="middle">(2)</text>
 <polyline points="509.6,34.0 590.5,136.2" fill="none" stroke="#ab47bc" stroke-width="2" opacity="0.65" stroke-linejoin="round"/>
+<polyline points="590.5,136.2 622.2,131.5" fill="none" stroke="#ab47bc" stroke-width="1" opacity="0.65" stroke-linejoin="round"/>
 <polyline points="622.2,131.5 645.3,193.2 656.9,153.6 680.0,217.7 700.2,165.0" fill="none" stroke="#42a5f5" stroke-width="2" stroke-dasharray="6 4" opacity="1.0" stroke-linejoin="round"/>
 <rect x="630.9" y="199.2" width="28.9" height="17.5" rx="3" fill="#42a5f5" opacity="0.9"/>
 <polygon points="641.3,199.2 649.3,199.2 645.3,194.2" fill="#42a5f5" opacity="0.9"/>
@@ -718,7 +720,7 @@ section[id]{ scroll-margin-top:16px; }
       <tr><td class="k"><span class="swatch" style="color:var(--lv2)"></span>实线 + (1)…(5)</td><td>历史上已经走完、通过全部规则的一组推动浪。浪3 长度达到浪1 的 1.618 倍时，浪3 那段加粗、标签加 ★</td><td>不变</td></tr>
       <tr><td class="k">▲ 绿 / ▼ 红三角</td><td>确认了一组看涨 / 看跌 1-5 的那一根K线</td><td>不变</td></tr>
       <tr><td class="k"><span class="swatch" style="color:var(--lv2)"></span>细横线</td><td>已确认推动浪的 ABC 调整目标。价格碰到或收盘越过浪5 终点就断开</td><td>断开后不再画</td></tr>
-      <tr><td class="k"><span class="swatch" style="color:var(--lv1);opacity:.6"></span>半透明实线 + 0、(1)…</td><td>推演所接的这组浪已经走过的部分：起点 0、走完的每一浪、正在走的那一浪（画到目前的极值）。标签颜色更淡。和已确认的 1-5 重合时不重画</td><td><strong>每根都重算</strong></td></tr>
+      <tr><td class="k"><span class="swatch" style="color:var(--lv1);opacity:.6"></span>半透明实线 + 0、(1)…</td><td>推演所接的这组浪已经走过的部分：起点 0、走完的每一浪、正在走的那一浪（画到目前的极值）。这一浪还没走完、价格已从极值回来一点时，再用细一号的线把极值连到现价，推演虚线从现价接上。标签颜色更淡。和已确认的 1-5 重合时不重画</td><td><strong>每根都重算</strong></td></tr>
       <tr><td class="k"><span class="swatch dash" style="color:var(--lv1)"></span>虚线 + 浪名</td><td>场景推演：从现在往后的几段。标签默认只写浪名，比如 <code>A</code>、<code>(3)</code></td><td><strong>每根都重算</strong></td></tr>
       <tr><td class="k">带 <code>?</code> 的标签</td><td>推演暂时当这一浪在极值处走完：要么它已越过目标、价格也回头了；要么它是新一轮的浪 (1)，前面没有可数的浪</td><td>每根都重算</td></tr>
       <tr><td class="k"><code>中·粗 (2)</code> 这样的标签</td><td>几个级别的推演完全相同，只画一条，标签写所有共用它的级别。默认的「浪名」模式标签不写级别，悬停浮窗里能看到</td><td>每根都重算</td></tr>
@@ -1213,6 +1215,7 @@ section[id]{ scroll-margin-top:16px; }
 <rect x="509.1" y="62.6" width="1.4" height="1.7" fill="#ef5350" opacity="0.55"/>
 <polyline points="-1.1,159.7 5.5,170.0 91.8,148.2 116.1,163.6 127.2,155.2 153.7,168.5 220.1,114.4 220.1,155.2 244.4,52.5 268.7,79.5 293.1,40.9 313.0,65.8 332.9,39.3 341.7,70.9 368.3,53.7 370.5,70.3 381.5,54.8 403.7,75.7 423.6,34.0 432.4,58.9 463.4,45.9 485.5,65.8 496.6,51.3" fill="none" stroke="#42a5f5" stroke-width="1" opacity="0.5" stroke-linejoin="round"/>
 <polyline points="463.4,45.9 485.5,65.8 496.6,51.3 509.8,65.5" fill="none" stroke="#42a5f5" stroke-width="2" opacity="0.65" stroke-linejoin="round"/>
+<polyline points="509.8,65.5 509.8,64.3" fill="none" stroke="#42a5f5" stroke-width="1" opacity="0.65" stroke-linejoin="round"/>
 <rect x="455.2" y="22.4" width="16.3" height="17.5" rx="3" fill="#42a5f5" opacity="0.45"/>
 <polygon points="459.4,39.9 467.4,39.9 463.4,44.9" fill="#42a5f5" opacity="0.45"/>
 <text x="463.4" y="34.9" font-size="10.5" fill="#ffffff" text-anchor="middle">0</text>
@@ -1718,6 +1721,7 @@ section[id]{ scroll-margin-top:16px; }
 <rect x="509.1" y="286.6" width="1.4" height="1.7" fill="#ef5350" opacity="0.55"/>
 <polyline points="-16.6,394.3 91.8,372.2 153.7,392.5 332.9,263.3 403.7,299.7 423.6,258.0" fill="none" stroke="#ab47bc" stroke-width="1" opacity="0.5" stroke-linejoin="round"/>
 <polyline points="-16.6,394.3 91.8,372.2 153.7,392.5 332.9,263.3 403.7,299.7 423.6,258.0 485.5,289.8" fill="none" stroke="#ab47bc" stroke-width="2" opacity="0.65" stroke-linejoin="round"/>
+<polyline points="485.5,289.8 509.8,288.3" fill="none" stroke="#ab47bc" stroke-width="1" opacity="0.65" stroke-linejoin="round"/>
 <rect x="-24.7" y="400.3" width="16.3" height="17.5" rx="3" fill="#ab47bc" opacity="0.45"/>
 <polygon points="-20.6,400.3 -12.6,400.3 -16.6,395.3" fill="#ab47bc" opacity="0.45"/>
 <text x="-16.6" y="412.8" font-size="10.5" fill="#ffffff" text-anchor="middle">0</text>
@@ -2918,7 +2922,7 @@ section[id]{ scroll-margin-top:16px; }
   <h3>判断现在在哪一浪</h3>
   <p>一个完整周期有 8 段：推动浪 1-2-3-4-5，接着调整 A-B-C。脚本对 8 个位置逐一检验：最近几个转折点能不能对上这个位置，走完的部分是否全部合规，正在走的那一段已经走出来的部分是否违规（比如正在走浪2，价格就不能已经跌破浪1 的起点）。</p>
   <p>它从最深的位置往回试，取第一个成立的，也就是能解释最多转折点的那个。8 个都不成立时，就当作「新的一浪1 正在走」：从最近一个转折点起算，暂按在当前极值处走完，状态表写 <code>(1)? 新一轮·暂按极值走完</code>。这个解读永远成立，所以只要图上有 2 个以上的转折点，就一定有推演。</p>
-  <p>选中的这组浪，已经走过的部分会画成半透明实线：起点标 0，走完的每一浪标浪名，正在走的那一浪画到目前的极值。推演虚线就从这里接上。输入页 ③ 组「标出推演所接的这组浪已走过的部分」可以关掉。</p>
+  <p>选中的这组浪，已经走过的部分会画成半透明实线：起点标 0，走完的每一浪标浪名，正在走的那一浪画到目前的极值。这一浪已按走完处理时，推演虚线从极值接上；还在走时，再用细一号的线把极值连到现价，虚线从现价接上，中间不断开。输入页 ③ 组「标出推演所接的这组浪已走过的部分」可以关掉。</p>
   <figure>
     <div class="diagram"><svg viewBox="0 0 760 260" role="img" aria-label="一个完整的艾略特周期：推动浪 1 到 5，接着调整 A、B、C；例子里现在正在走 A，实线是已经发生的，虚线是推演" font-size="12" fill="currentColor"><line x1="430" y1="26" x2="430" y2="222" stroke-dasharray="2 4" stroke-width="1" style="stroke:var(--faint)"/><text x="430" y="18" text-anchor="middle" font-weight="700">现在</text><polyline points="30,210 100,150 140,185 270,60 310,110 400,40 430,80" fill="none" stroke-width="2" stroke-linejoin="round" stroke="currentColor"/><polyline points="430,80 460,120 505,80 575,160 650,110" fill="none" stroke-width="2" stroke-linejoin="round" style="stroke:var(--lv2)" stroke-dasharray="7 5"/><circle cx="430" cy="80" r="4.5" fill="currentColor"/><text x="22" y="214" text-anchor="end" font-family="JetBrains Mono, ui-monospace, monospace">0</text><text x="100" y="140" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(1)</text><text x="140" y="205" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(2)</text><text x="270" y="50" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(3)</text><text x="310" y="130" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(4)</text><text x="400" y="30" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(5)</text><text x="460" y="140" text-anchor="middle" font-weight="700" style="fill:var(--lv2)">A</text><text x="505" y="70" text-anchor="middle" font-weight="700" style="fill:var(--lv2)">B</text><text x="575" y="180" text-anchor="middle" font-weight="700" style="fill:var(--lv2)">C</text><text x="650" y="100" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" style="fill:var(--lv2)">(1)′</text><path d="M30,226 V232 H400 V226" fill="none" stroke-width="1" stroke="currentColor" opacity=".55"/><text x="215" y="249" text-anchor="middle" style="fill:var(--muted)">推动浪 1-2-3-4-5</text><path d="M406,226 V232 H575 V226" fill="none" stroke-width="1" stroke="currentColor" opacity=".55"/><text x="490.5" y="249" text-anchor="middle" style="fill:var(--muted)">调整 A-B-C</text><text x="650" y="249" text-anchor="middle" style="fill:var(--muted)">下一轮</text><line x1="600" y1="22" x2="630" y2="22" stroke-width="2" stroke="currentColor"/><text x="636" y="26" text-anchor="start" style="fill:var(--muted)">已经发生</text><line x1="600" y1="42" x2="630" y2="42" stroke-width="2" stroke-dasharray="7 5" style="stroke:var(--lv2)"/><text x="636" y="46" text-anchor="start" style="fill:var(--muted)">推演</text></svg></div>
     <span class="swipe">手机上可以左右滑动看图。</span>

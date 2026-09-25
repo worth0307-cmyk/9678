@@ -41,7 +41,7 @@
 //   后整串枢轴可能挪位。推演是规则的机械推论，不是信号。
 // =============================================================================
 
-indicator("impulse_wave", "Impulse 1-5", overlay = true,
+indicator("impulse_wave", "Impulse Wave", overlay = true,
      max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
 
 // ───────────────────────────────────────────────────────── 1. 输入
@@ -806,6 +806,11 @@ method scenario(Lv L) =>
                          color = color.new(c, 55), textcolor = color.white, size = szLbl, tooltip = tipJ))
                 bPrev := bj
                 yPrev := yj
+            // 正在走的那一浪还没走完、价格已经从极值回来一点（没到反转阈值）：实线停在极值，
+            // 推演虚线却从现价起，中间那几根就断开了。把「极值 → 现价」也连上（细一号）
+            if not done and (L.extBi < bar_index or L.ext != close)
+                array.push(L.sL, line.new(L.extBi, L.ext, bar_index, close, xloc = xloc.bar_index,
+                     color = cP, style = line.style_solid, width = 1))
         if done
             string tipD = "级别「" + L.tag + "」 · " + scName(kk) + "?\n\n" + array.get(W, kk)
                  + "\n\nZigZag 还没确认反转（反向还没走出 ATR×" + str.tostring(L.mult)

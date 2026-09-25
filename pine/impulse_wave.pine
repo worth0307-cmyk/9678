@@ -1,6 +1,6 @@
 //@version=6
 
-indicator("impulse_wave", "Impulse 1-5", overlay = true,
+indicator("impulse_wave", "Impulse Wave", overlay = true,
      max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
 
 gZ = "① ZigZag（ATR 反转阈值）"
@@ -708,6 +708,9 @@ method scenario(Lv L) =>
                          color = color.new(c, 55), textcolor = color.white, size = szLbl, tooltip = tipJ))
                 bPrev := bj
                 yPrev := yj
+            if not done and (L.extBi < bar_index or L.ext != close)
+                array.push(L.sL, line.new(L.extBi, L.ext, bar_index, close, xloc = xloc.bar_index,
+                     color = cP, style = line.style_solid, width = 1))
         if done
             string tipD = "级别「" + L.tag + "」 · " + scName(kk) + "?\n\n" + array.get(W, kk)
                  + "\n\nZigZag 还没确认反转（反向还没走出 ATR×" + str.tostring(L.mult)

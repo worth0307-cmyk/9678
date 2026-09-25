@@ -105,7 +105,9 @@ projRetr = input.float(0.5, "高度 · ABC 合计回撤推动浪", minval = 0.1,
      tooltip = "C 的终点 = 浪5 终点回撤 (1-5 全长) × 这个比例。\n" +
                "A、B、C 的分配按最常见的锯齿形：B 回撤 A 下面那个比例，C = A。")
 retB = input.float(0.618, "高度 · B 回撤 A", minval = 0.1, maxval = 0.99, step = 0.01, group = gP)
-projRay = input.bool(true, "在推演终点价画水平射线", group = gP)
+projRay = input.bool(true, "在推演终点价画水平射线", group = gP,
+     tooltip = "从推演终点往右延伸。旧版从当前K线画起，终点价离现价远时（比如 +52%）" +
+               "会把整张图的纵轴撑开、K线被压扁；现在从终点画起，不影响当前视图。")
 
 gS = "④ 样式"
 // TradingView 的「样式」标签页只收 plot/plotshape 这类输出，line/label/box 这种
@@ -134,6 +136,15 @@ tblSz   = input.string("极小", "字号", options = ["极小", "小", "中", "�
      tooltip = "默认极小，不占图。**鼠标移到状态表任意一行上，会弹出这一行的完整明细**" +
                "（正常字号）：当前位置、推演路径每一段的价位 / 涨跌幅 / 大约几根后到、腿的速度。\n\n" +
                "Pine 指标没法响应鼠标点击，所以做不成「点一下放大」；悬停浮窗是最接近的原生功能。")
+tblPos  = input.string("右下", "状态表位置", options = ["右下", "右中", "右上", "左下", "左中", "左上", "中下", "中上"],
+     group = gS, tooltip = "Pine 的表格只能放在固定位置，没法用鼠标拖动。在这里选。")
+detailMode = input.string("悬停浮窗（电脑）", "详情显示方式", options = ["悬停浮窗（电脑）", "直接显示（手机）"],
+     group = gS,
+     tooltip = "悬停浮窗：图上干净，鼠标移到标签 / 状态表上才弹出详情。**手机上没有悬停，用不了。**\n\n" +
+               "直接显示：推演标签写全（浪名 + 价位 + %），状态表下方多出一块明细，" +
+               "列出下面那个级别推演路径的每一个点：价位、离现价、约几根后和日期、依据。不用悬停。\n\n" +
+               "注意：指标设置跟着图表布局走，会在电脑和手机之间同步。")
+detailLv = input.string("细", "直接显示时列出哪个级别", options = ["细", "中", "粗"], group = gS)
 
 // ATR 前 atrLen 根是 na。兜底成 10 个 tick 会让阈值近乎为零、开头几根疯狂确认枢轴，
 // 所以宁可等 ATR 有效再开始滚。
@@ -143,6 +154,8 @@ atrV   = nz(atrRaw, syminfo.mintick * 10.0)
 
 szLbl = lblSize == "normal" ? size.normal : lblSize == "small" ? size.small : size.tiny
 szT   = tblSz == "大" ? size.large : tblSz == "中" ? size.normal : tblSz == "小" ? size.small : size.tiny
+posT  = tblPos == "右上" ? position.top_right : tblPos == "右中" ? position.middle_right : tblPos == "左下" ? position.bottom_left : tblPos == "左中" ? position.middle_left : tblPos == "左上" ? position.top_left : tblPos == "中下" ? position.bottom_center : tblPos == "中上" ? position.top_center : position.bottom_right
+direct = detailMode == "直接显示（手机）"
 stPrj = pStyle == "实线" ? line.style_solid : pStyle == "点线" ? line.style_dotted : line.style_dashed
 
 // ───────────────────────────────────────────────────────── 2. 枢轴序列
@@ -186,22 +199,26 @@ type Lv
     string       note     // 状态表：当前位置
     string       note2    // 状态表：推演终点
     string       tip      // 状态表：悬停浮窗里的完整推演明细
+    array<string> dCells  // 状态表：「直接显示」模式的明细，每行 5 格摊平存
 
 var Lv LA = Lv.new(name = "细", mult = useA, col = cA, wid = wA, on = onA, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
-     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "")
+     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
+     dCells = array.new<string>())
 var Lv LB = Lv.new(name = "中", mult = useB, col = cB, wid = wB, on = onB, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
-     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "")
+     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
+     dCells = array.new<string>())
 var Lv LC = Lv.new(name = "粗", mult = useC, col = cC, wid = wC, on = onC, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
-     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "")
+     sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
+     dCells = array.new<string>())
 
 // ZigZag 单步。返回：本根是否**确认**了一个新枢轴。
 // 确认条件是收盘价从当前腿的极值反向走出 thr —— 收盘才算，所以枢轴一旦确认
@@ -478,37 +495,46 @@ scTgt(array<float> E, float x0, int j, bool ext, float eps) =>
     float L1 = na(e0) ? na : e0 - x0
     float t = na
     string why = ""
+    string brf = ""                     // 短依据：手机「直接显示」明细表里放得下的版本
     if j == 1
         float r = ext ? 0.786 : ret2
         t := math.max(e0 - r * L1, x0 + eps)
         why := "浪2 回撤浪1 的 " + str.tostring(r)
+        brf := "回撤浪1 " + str.tostring(r)
     else if j == 2
         float r = fib3 + (ext ? 1.0 : 0.0)
         t := math.max(array.get(E, 1) + r * L1, e0 + eps)
         why := "浪3 = " + str.tostring(r) + " × 浪1，从浪2 终点量起"
+        brf := str.tostring(r) + "×浪1"
     else if j == 3
         float r = ext ? 0.5 : ret4
         float l3a = array.get(E, 2) - array.get(E, 1)
         t := array.get(E, 2) - r * l3a
         why := "浪4 回撤浪3 的 " + str.tostring(r)
+        brf := "回撤浪3 " + str.tostring(r)
         float floor4 = e0 - ovTol * L1 + eps
         if t < floor4
             t := floor4
             why := why + "；会进浪1 区间，被抬到浪1 终点之外"
+            brf := brf + "·不进浪1"
     else if j == 4
         float r = fib5 + (ext ? 0.618 : 0.0)
         float l3b = array.get(E, 2) - array.get(E, 1)
         t := array.get(E, 3) + r * L1
         why := "浪5 = " + str.tostring(r) + " × 浪1，从浪4 终点量起"
+        brf := str.tostring(r) + "×浪1"
         if t <= array.get(E, 2)
             t := array.get(E, 3) + 0.618 * (array.get(E, 2) - x0)
             why := "浪3 延长，「浪5 = 浪1」过不了浪3 → 改用 浪5 = 0.618 × (浪1 起点 → 浪3 终点)"
+            brf := "0.618×(1→3)"
         if l3b < L1 and t > array.get(E, 3) + l3b
             t := array.get(E, 3) + l3b
             why := why + "；浪3 比浪1 短，浪5 不能比浪3 长（否则浪3 成了最短）"
+            brf := brf + "·≤浪3长"
         if need5 and t < array.get(E, 2) + eps
             t := array.get(E, 2) + eps
             why := why + "；被抬到刚好越过浪3 终点"
+            brf := brf + "·过浪3"
     else if j == 5
         // ABC 合计回撤 = projRetr × 推动浪；B 回撤 A 的 retB，C = A
         // → 净回撤 = A − retB·A + A = (2 − retB)·A
@@ -516,29 +542,36 @@ scTgt(array<float> E, float x0, int j, bool ext, float eps) =>
         t := math.max(array.get(E, 4) - a * (ext ? 1.618 : 1.0), x0 + eps)
         why := "ABC 合计回撤推动浪的 " + str.tostring(projRetr) + "；按锯齿形分配 A = 合计 ÷ (2 − "
              + str.tostring(retB) + ")" + (ext ? "，再 × 1.618 延长" : "")
+        brf := "ABC合计回撤 " + str.tostring(projRetr) + (ext ? "·×1.618" : "")
     else if j == 6
         float r = ext ? 0.786 : retB
         float aB = array.get(E, 4) - array.get(E, 5)
         t := array.get(E, 5) + r * aB
         why := "B 回撤 A 的 " + str.tostring(r)
+        brf := "回撤A " + str.tostring(r)
         if t > array.get(E, 4) - eps
             t := array.get(E, 4) - eps
             why := why + "；被压在浪5 终点之下"
+            brf := brf + "·<浪5"
     else if j == 7
         float r = ext ? 1.618 : 1.0
         float aC = array.get(E, 4) - array.get(E, 5)
         t := array.get(E, 6) - r * aC
         why := "C = " + str.tostring(r) + " × A，从 B 终点量起"
+        brf := "C=" + str.tostring(r) + "×A"
         if t < x0 + eps
             t := x0 + eps
             why := why + "；被抬到推动浪起点之上"
+            brf := brf + "·>起点"
     else if j == 8
         t := array.get(E, 7) + L1
         why := "下一轮浪1：假设和上一轮浪1 一样长（没有更好的参照）"
+        brf := "≈上轮浪1"
     else if j == 9
         t := array.get(E, 8) - ret2 * L1
         why := "下一轮浪2 回撤浪1 的 " + str.tostring(ret2)
-    [t, why]
+        brf := "回撤浪1 " + str.tostring(ret2)
+    [t, why, brf]
 
 method clearScen(Lv L) =>
     if array.size(L.sL) > 0
@@ -558,6 +591,7 @@ method scenario(Lv L) =>
     L.note  := ""
     L.note2 := ""
     L.tip   := ""
+    array.clear(L.dCells)
     int n = array.size(L.pv)
     if L.dir == 0 or n < 2
         L.note := "枢轴不足（" + str.tostring(n) + " 个）"
@@ -586,30 +620,35 @@ method scenario(Lv L) =>
         bool running = bar_index - L.extBi <= 1     // 极值就在最近两根 → 这一段还在走
         bool done = false
         bool extd = false
-        array<string> W = array.new<string>(10, "")  // 每个点的高度依据，悬停浮窗用
+        array<string> W  = array.new<string>(10, "")  // 每个点的高度依据，悬停浮窗用
+        array<string> Wb = array.new<string>(10, "")  // 同上的短版本，手机明细表用
         for j = kk to 9
             float t = xe
             string why = "新的浪1：没有更早的参照，假设在当前极值处走完"
+            string brf = "当前极值"
             if j > 0
-                [t0, w0] = scTgt(E, x0, j, false, eps)
+                [t0, w0, bf0] = scTgt(E, x0, j, false, eps)
                 t := t0
                 why := w0
+                brf := bf0
             if j == kk
                 bool up = j % 2 == 0
                 bool beyond = up ? xe >= t : xe <= t
                 if beyond and running and j > 0
                     // 越过目标、还在走 → 按延长浪取下一档
                     float tOrig = t
-                    [t1, w1] = scTgt(E, x0, j, true, eps)
+                    [t1, w1, bf1] = scTgt(E, x0, j, true, eps)
                     t := t1
                     extd := true
                     why := "越过原目标 " + str.tostring(s * tOrig, format.mintick) + "、还在走 → 取延长档：" + w1
+                    brf := "延长·" + bf1
                     beyond := up ? xe >= t : xe <= t
                 if beyond and j > 0
                     // 越过目标、已回头 → 暂按这一段在极值处走完
                     why := "实际已走到 " + str.tostring(L.ext, format.mintick)
                          + (extd ? "，连延长档 " : "，越过目标 ") + str.tostring(s * t, format.mintick)
                          + (extd ? " 都越过了" : " 之后已回头") + " → 暂按在这里走完。原目标：" + why
+                    brf := "实际极值"
                 else if not beyond
                     why := why + "。正在走，目前走到 " + str.tostring(L.ext, format.mintick)
                 array.set(E, j, beyond ? xe : t)
@@ -617,6 +656,7 @@ method scenario(Lv L) =>
             else
                 array.set(E, j, t)
             array.set(W, j, why)
+            array.set(Wb, j, brf)
 
         // ── 3. 角度：同类腿的实测速度。本组走完的腿各一票，本级别近 10 条腿的中位数一票
         array<float> vi = array.new<float>()
@@ -692,7 +732,7 @@ method scenario(Lv L) =>
 
         // ── 5. 画
         color c = L.col
-        bool fullLbl = projLbl != "浪名"
+        bool fullLbl = direct or projLbl != "浪名"
         if done
             string tipD = "级别「" + L.name + "」 · " + scName(kk) + "?\n\n" + array.get(W, kk)
                  + "\n\nZigZag 还没确认反转（反向还没走出 ATR×" + str.tostring(L.mult)
@@ -734,7 +774,10 @@ method scenario(Lv L) =>
                  color = color.new(c, 25), textcolor = color.white, size = szLbl, tooltip = tipP))
         float yEnd = s * array.get(px, np - 1)
         if projRay
-            L.sRay := line.new(bar_index, yEnd, bar_index + 1, yEnd, xloc = xloc.bar_index,
+            // 从推演终点往右画。旧版从当前K线画起：终点价离现价远的时候（比如 +52%），
+            // 这条线就落在当前视图里，TradingView 自动缩放把它算进去，纵轴被撑开、K线被压扁。
+            int tEnd = array.get(pt, np - 1)
+            L.sRay := line.new(tEnd, yEnd, tEnd + 1, yEnd, xloc = xloc.bar_index,
                  extend = extend.right, color = color.new(c, 50), style = line.style_dotted, width = 1)
 
         // ── 6. 状态表文字
@@ -770,6 +813,31 @@ method scenario(Lv L) =>
         tp := tp + "\n\n角度依据 · 实测速度：推动腿 " + str.tostring(vImp, format.mintick)
              + " / 根，调整腿 " + str.tostring(vCor, format.mintick) + " / 根"
         L.tip := tp
+
+        // ── 8. 「直接显示」模式的明细行：浪 | 价位 | 离现价 | 约几根后·日期 | 依据
+        if done
+            float cD = (L.ext / close - 1.0) * 100.0
+            array.push(L.dCells, scName(kk) + "?")
+            array.push(L.dCells, str.tostring(L.ext, format.mintick))
+            array.push(L.dCells, (cD >= 0 ? "+" : "") + str.tostring(cD, "#.#") + "%")
+            array.push(L.dCells, "已发生")
+            array.push(L.dCells, array.get(Wb, kk))
+        for ri = 1 to np - 1
+            int wr = array.get(pw, ri)
+            float yr = s * array.get(px, ri)
+            float cr = (yr / close - 1.0) * 100.0
+            int ar = array.get(pt, ri) - bar_index
+            array.push(L.dCells, scName(wr))
+            array.push(L.dCells, str.tostring(yr, format.mintick))
+            array.push(L.dCells, (cr >= 0 ? "+" : "") + str.tostring(cr, "#.#") + "%")
+            array.push(L.dCells, "约 " + str.tostring(ar) + " 根 · "
+                 + str.format_time(time + ar * tfSec * 1000, tfSec >= 86400 ? "MM-dd" : "MM-dd HH:mm", syminfo.timezone))
+            array.push(L.dCells, array.get(Wb, wr))
+        array.push(L.dCells, "速度")
+        array.push(L.dCells, "推动腿")
+        array.push(L.dCells, str.tostring(vImp, format.mintick) + "/根")
+        array.push(L.dCells, "调整腿")
+        array.push(L.dCells, str.tostring(vCor, format.mintick) + "/根")
 
 // ───────────────────────────────────────────────────────── 6. 每根维护
 
@@ -815,6 +883,7 @@ if showProj and barstate.islast
             LB.note2 := ""
             LB.tip := "和「" + LA.name + "」选中了同一个起点和位置，推演路径完全一样，"
                  + "图上只画「" + LA.name + "」那条。\n\n" + LA.tip
+            LB.dCells := array.copy(LA.dCells)
     if LC.on
         LC.scenario()
         if LA.on and LC.sK >= 0 and LC.sK == LA.sK and LC.sP0 == LA.sP0
@@ -823,12 +892,14 @@ if showProj and barstate.islast
             LC.note2 := ""
             LC.tip := "和「" + LA.name + "」选中了同一个起点和位置，推演路径完全一样，"
                  + "图上只画「" + LA.name + "」那条。\n\n" + LA.tip
+            LC.dCells := array.copy(LA.dCells)
         else if LB.on and LC.sK >= 0 and LC.sK == LB.sK and LC.sP0 == LB.sP0
             LC.clearScen()
             LC.note := "同「" + LB.name + "」的场景，不重复画"
             LC.note2 := ""
             LC.tip := "和「" + LB.name + "」选中了同一个起点和位置，推演路径完全一样，"
                  + "图上只画「" + LB.name + "」那条。\n\n" + LB.tip
+            LC.dCells := array.copy(LB.dCells)
 
 float tgtA = LA.on ? LA.activeTgt() : na
 float tgtB = LB.on ? LB.activeTgt() : na
@@ -857,7 +928,7 @@ method tblRow(Lv L, table tb, int r, float m) =>
          text_color = L.col, text_size = szT, text_halign = text.align_left, tooltip = tp)
 
 if showTbl and barstate.islast
-    var table tb = table.new(position.bottom_right, 5, 5,
+    var table tb = table.new(posT, 5, 14,
          bgcolor = color.new(color.black, 15), border_width = 1,
          border_color = color.new(color.gray, 60),
          frame_width = 1, frame_color = color.new(color.gray, 40))
@@ -885,11 +956,37 @@ if showTbl and barstate.islast
     table.cell(tb, 0, 4, "⚠", text_color = color.orange, text_size = szT, tooltip = fTip)
     table.cell(tb, 1, 4, str.tostring(bar_index + 1) + " 根", text_color = color.orange, text_size = szT,
          tooltip = fTip)
-    table.cell(tb, 2, 4, "悬停看明细", text_color = color.orange, text_size = szT, tooltip = fTip)
+    table.cell(tb, 2, 4, direct ? "明细见下方" : "悬停看明细", text_color = color.orange, text_size = szT,
+         tooltip = fTip)
     table.cell(tb, 3, 4, "? = 越过目标已回头，暂按走完", text_color = color.orange, text_size = szT,
          text_halign = text.align_left, tooltip = fTip)
     table.cell(tb, 4, 4, "推演是推论，不是信号", text_color = color.orange, text_size = szT,
          text_halign = text.align_left, tooltip = fTip)
+
+    // 「直接显示（手机）」：把选中级别的推演路径逐点列在下面，不靠悬停
+    table.clear(tb, 0, 5, 4, 13)
+    if direct and showProj
+        Lv D = LA
+        if detailLv == "中"
+            D := LB
+        else if detailLv == "粗"
+            D := LC
+        table.cell(tb, 0, 5, "「" + D.name + "」明细", text_color = D.col, text_size = szT)
+        table.cell(tb, 1, 5, "价位",           text_color = color.silver, text_size = szT)
+        table.cell(tb, 2, 5, "离现价",         text_color = color.silver, text_size = szT)
+        table.cell(tb, 3, 5, "约几根后 · 日期", text_color = color.silver, text_size = szT)
+        table.cell(tb, 4, 5, "依据",           text_color = color.silver, text_size = szT)
+        int nd = int(array.size(D.dCells) / 5)
+        if not D.on
+            table.cell(tb, 0, 6, "这个级别没开", text_color = color.silver, text_size = szT)
+        else if nd == 0
+            table.cell(tb, 0, 6, "暂无推演", text_color = color.silver, text_size = szT)
+        else
+            for ri = 0 to math.min(nd, 8) - 1
+                for ci = 0 to 4
+                    table.cell(tb, ci, 6 + ri, array.get(D.dCells, ri * 5 + ci),
+                         text_color = ri == nd - 1 ? color.silver : D.col, text_size = szT,
+                         text_halign = ci == 4 ? text.align_left : text.align_center)
 
 // ───────────────────────────────────────────────────────── 7. 警报
 

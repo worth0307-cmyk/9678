@@ -196,7 +196,7 @@ fibColA     = input.color(#2962ff, "Window A", group = GRP_FIBC)
 fibColB     = input.color(#ff9800, "Window B", group = GRP_FIBC)
 fibColTxt   = input.color(#d1d4dc, "档位文字", group = GRP_FIBC)
 fibLblSize  = fibSizeIn == "小 / small" ? size.small : fibSizeIn == "中 / normal" ? size.normal : fibSizeIn == "大 / large" ? size.large : size.huge
-// 一行文字大约占窗格高度的百分之几 —— 停在边上那几条的行距照这个给。
+// 一行文字大约占可见价格区间的百分之几 —— 只用来留空隙和占位，区间外那几行的行距由多行标签自己排。
 fibStepPct  = fibSizeIn == "小 / small" ? 0.025 : fibSizeIn == "中 / normal" ? 0.035 : fibSizeIn == "大 / large" ? 0.045 : 0.06
 
 // 窗口长度按图表自身周期换算成根数,所以日线的"1 年"和周线的"1 年"都是一年。
@@ -257,9 +257,11 @@ fibGrouped(price) =>
             fOut := fOut + ","
     (fNeg ? "-" : "") + fOut + "." + (fFrac < 10 ? "0" : "") + str.tostring(fFrac, "#")
 
-// 排版：区间内的档位一格都不挪,画在它自己的价位上 —— 标签和那条横线必须对得上,这是
-// 这个指标唯一的用处。区间外的本来就没有真实位置可言,叠在本列的上方(↑)或下方(↓);
-// 往里叠的时候遇到本列区间内的标签就跳过它再往下接着叠,所以两边都不用让步。
+// 排版：区间内的档位画在它自己的价位上 —— 标签和那条横线必须对得上,这是这个指标唯一的
+// 用处;几个档位近到不足一行时并成一个多行标签,居中放在它们中间,各行离自己的线只差几个
+// 像素。区间外的本来就没有真实位置可言,每列上方(↑)一堆、下方(↓)一堆,各合成一个多行标签。
+// 多行标签的行距由 TradingView 按真实字高排,怎么缩放都不会互相压住。以前是一行一个标签、
+// 按估出来的「一行占多少价格」往上叠,价格轴被别的线撑开时估小了,几行就叠在一起。
 fibAdd(ys, ks, rs, ts, ls, cs, y, k, r, t, l, c) =>
     pos = array.size(ys)
     if pos > 0
@@ -273,19 +275,6 @@ fibAdd(ys, ks, rs, ts, ls, cs, y, k, r, t, l, c) =>
     array.insert(ts, pos, t)
     array.insert(ls, pos, l)
     array.insert(cs, pos, c)
-
-fibSlot(blkY, blkL, lane, start, step, up) =>
-    out = start
-    for fp = 0 to 11
-        hit = false
-        if array.size(blkY) > 0
-            for fi = 0 to array.size(blkY) - 1
-                if array.get(blkL, fi) == lane and math.abs(array.get(blkY, fi) - out) < step
-                    out := up ? array.get(blkY, fi) + step : array.get(blkY, fi) - step
-                    hit := true
-        if not hit
-            break
-    out
 
 var fibRatios = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
 var fibMarks = array.new_label(0)
@@ -336,78 +325,137 @@ if fibOn and barstate.islast
 
     fN = array.size(fYs)
     if fN > 0
-        // 贴着可见区间的上下沿,不再留边距 —— 往下的那一堆就尽量低,往上的尽量高。
-        // 再往外就到视图之外了,价格轴会跟着被拉开,K 线又要被压扁。
         fTop = na(fibVisHi) ? array.get(fYs, 0) : fibVisHi
         fBot = na(fibVisLo) ? array.get(fYs, fN - 1) : fibVisLo
-        fStep = math.min((fTop - fBot) * fibStepPct, (fTop - fBot) / (fN + 1))
-        // 区间内的标签已经在自己的价位上了,它们是停靠时要绕开的障碍。
-        fBlkY = array.new_float(0)
-        fBlkL = array.new_int(0)
+        // 一行字大约占多少价格。脚本看不到窗格的像素高度,这只是估计 —— 堆里、簇里的行距
+        // 不靠它(多行标签自己排),它只决定两件事：哪几个区间内的档位近到要并成一簇,以及
+        // 各块之间留多大空隙。乘 1.6：价格轴除了可见 K 线还要装上下留白和别的线,一行实际
+        // 占的价格比按 K 线区间算的大;估大了只是多空一点、K 线略扁,估小了才会压住。
+        fRow = (fTop - fBot) * fibStepPct * 1.6
+        // 现价离本列某个区间内档位不到一行时会压在它身上：不单独画,把「◀ 现价」接在那一行后面
+        int nowIdx = -1
+        int nowTo = -1
         for fi = 0 to fN - 1
-            if array.get(fKs, fi) == 0
-                // 区间内的窗口标题是往上挂的(style_label_lower_left),文字占的是锚点
-                // 上面那一行,所以挡住的位置要按上半行算,否则停靠的会压到它身上。
-                array.push(fBlkY, array.get(fYs, fi) + (array.get(fRs, fi) == 1 ? fStep * 0.5 : 0))
-                array.push(fBlkL, array.get(fLs, fi))
-        // 向上停靠的一堆整体排在本列区间内标签的上方,中间留一行空隙,堆内从下往上是
-        // 标题、然后档位按价格递增 —— 所以标题在最下面,紧挨着本列的行情区。
-        // 现价常常就贴在视图顶上(你这张图里在窗格 88% 处),六行根本塞不进它上面那点
-        // 空当,所以这一堆允许顶出可见区间,上限是区间高度的 25%：价格轴会被拉高这么
-        // 多(这张图约 9%),远不到当初把 K 线压成一条的地步。实在还不够就把行距压到
-        // 半行为止。
-        for fLn = 0 to 1
-            float fGuard = na
-            fCnt = 0
+            if array.get(fRs, fi) == 2
+                nowIdx := fi
+        if nowIdx >= 0
+            float best = na
             for fi = 0 to fN - 1
-                if array.get(fLs, fi) == fLn
-                    if array.get(fKs, fi) == 0
-                        // 标题往上挂,占的是锚点上面那一行,按整行算
-                        fG = array.get(fYs, fi) + (array.get(fRs, fi) == 1 ? fStep : fStep * 0.5)
-                        fGuard := na(fGuard) ? fG : math.max(fGuard, fG)
-                    if array.get(fKs, fi) == 1
-                        fCnt := fCnt + 1
-            if fCnt > 0
-                fHug = fTop - (fCnt - 1) * fStep
-                fLowest = na(fGuard) ? fHug : math.max(fGuard + fStep * 0.5, fHug)
-                fSlot = fCnt - 1
-                fCur = fTop
-                // 行距永远是整整一行,不压缩 —— 压缩就等于让标签互相盖住,那比排得
-                // 不够高更糟。顶出去超过上限就退回老办法:从视图顶往下排,遇到本列
-                // 区间内的标签绕过去。
-                fRoom = fLowest + (fCnt - 1) * fStep <= fTop + (fTop - fBot) * 0.25
-                for fPass = 0 to 1
-                    for fi = 0 to fN - 1
-                        if array.get(fKs, fi) == 1 and array.get(fLs, fi) == fLn and (fPass == 0) == (array.get(fRs, fi) != 1)
-                            if fRoom
-                                array.set(fYs, fi, fLowest + fSlot * fStep)
-                                fSlot := fSlot - 1
-                            else
-                                fY = math.max(fBot, fibSlot(fBlkY, fBlkL, fLn, fCur, fStep, false))
-                                array.set(fYs, fi, fY)
-                                fCur := fY - fStep
-        fDn0 = fBot
-        fDn1 = fBot
-        for fi = fN - 1 to 0
-            if array.get(fKs, fi) == 2
-                fLn = array.get(fLs, fi)
-                fY = math.min(fTop, fibSlot(fBlkY, fBlkL, fLn, fLn == 0 ? fDn0 : fDn1, fStep, true))
-                array.set(fYs, fi, fY)
-                if fLn == 0
-                    fDn0 := fY + fStep
-                else
-                    fDn1 := fY + fStep
-        for fi = 0 to fN - 1
-            fRole = array.get(fRs, fi)
-            fC = array.get(fCs, fi)
-            fXd = bar_index + fibGap + array.get(fLs, fi) * fibColGap
-            fTc = fRole == 0 ? fibColTxt : fC
-            fBc = fRole == 0 ? color.new(fC, 82) : (fRole == 1 ? color.new(fC, 100) : color.new(fC, 88))
-            // 只有钉在真实价位上的标题才往上挂 —— 那一行的锚点被 1.000 占着,往上挂
-            // 正好错开。停靠的标题有自己的一格,必须和别的标签一样居中,否则会往上
-            // 压到 ↑ 那一堆的最后一条上。
-            fSt = fRole == 1 and array.get(fKs, fi) == 0 ? label.style_label_lower_left : label.style_label_left
-            array.push(fibMarks, label.new(x = fXd, y = array.get(fYs, fi), text = array.get(fTs, fi), xloc = xloc.bar_index, yloc = yloc.price, color = fBc, style = fSt, textcolor = fTc, size = fibLblSize, textalign = text.align_left))
+                if fi != nowIdx and array.get(fKs, fi) == 0 and array.get(fRs, fi) == 0 and array.get(fLs, fi) == array.get(fLs, nowIdx)
+                    fD = math.abs(array.get(fYs, fi) - array.get(fYs, nowIdx))
+                    if fD < fRow and (na(best) or fD < best)
+                        best := fD
+                        nowTo := fi
+            if nowTo >= 0
+                array.set(fTs, nowTo, array.get(fTs, nowTo) + "   ◀ " + array.get(fTs, nowIdx))
+        for fLn = 0 to 1
+            fXd = bar_index + fibGap + fLn * fibColGap
+            float gTop = na
+            float gBot = na
+            upTxt = ""
+            dnTxt = ""
+            upTitle = ""
+            dnTitle = ""
+            nUp = 0
+            nDn = 0
+            color lnCol = fibColTxt
+            float tY = na
+            tTxt = ""
+            pY = array.new_float(0)
+            pT = array.new_string(0)
+            pR = array.new_int(0)
+            pC = array.new_color(0)
+            // fYs 按价格从高到低排好了,下面各处的行也就都是从高到低
+            for fi = 0 to fN - 1
+                if array.get(fLs, fi) == fLn and not (fi == nowIdx and nowTo >= 0)
+                    fY = array.get(fYs, fi)
+                    fK = array.get(fKs, fi)
+                    fRole = array.get(fRs, fi)
+                    fC = array.get(fCs, fi)
+                    fT = array.get(fTs, fi)
+                    if fRole != 2
+                        lnCol := fC
+                    if fK == 0 and fRole == 1
+                        tY := fY
+                        tTxt := fT
+                    else if fK == 0
+                        array.push(pY, fY)
+                        array.push(pT, fT)
+                        array.push(pR, fRole)
+                        array.push(pC, fC)
+                    else if fRole == 1
+                        if fK == 1
+                            upTitle := fT
+                        else
+                            dnTitle := fT
+                    else if fK == 1
+                        upTxt := upTxt == "" ? fT : upTxt + "\n" + fT
+                        nUp += 1
+                    else
+                        dnTxt := dnTxt == "" ? fT : dnTxt + "\n" + fT
+                        nDn += 1
+            // 区间内：离下一个不到一行的并成一簇,一簇画成一个多行标签,中心放在这簇最高和
+            // 最低价位的正中。离得开的就是一个一个单独钉在自己价位上;挤在一起的,各行离自己
+            // 那条线只差几个像素,但绝不互相压住。
+            bool tMerged = false
+            nP = array.size(pY)
+            if nP > 0
+                cTxt = ""
+                cN = 0
+                float cHi = na
+                for fp = 0 to nP - 1
+                    fPy = array.get(pY, fp)
+                    if cN == 0
+                        cHi := fPy
+                    cTxt := cN == 0 ? array.get(pT, fp) : cTxt + "\n" + array.get(pT, fp)
+                    cN += 1
+                    if fp == nP - 1 or fPy - array.get(pY, fp + 1) >= fRow
+                        cY = (cHi + fPy) / 2
+                        cLines = cN
+                        // 窗口高点那一档和下面的并了簇,它头上挂的标题就放进这一块的第一行
+                        if cN > 1 and not na(tY) and math.abs(cHi - tY) <= math.abs(tY) * 1e-9
+                            cTxt := tTxt + "\n" + cTxt
+                            cLines += 1
+                            cY += fRow * 0.5
+                            tMerged := true
+                        cNow = cN == 1 and array.get(pR, fp) == 2
+                        cTc = cNow ? array.get(pC, fp) : fibColTxt
+                        cBg = cNow ? color.new(array.get(pC, fp), 88) : color.new(lnCol, 82)
+                        array.push(fibMarks, label.new(x = fXd, y = cY, text = cTxt, xloc = xloc.bar_index, yloc = yloc.price, color = cBg, style = label.style_label_left, textcolor = cTc, size = fibLblSize, textalign = text.align_left))
+                        cHiEdge = cY + cLines * fRow * 0.5
+                        cLoEdge = cY - cLines * fRow * 0.5
+                        gTop := na(gTop) ? cHiEdge : math.max(gTop, cHiEdge)
+                        gBot := na(gBot) ? cLoEdge : math.min(gBot, cLoEdge)
+                        cTxt := ""
+                        cN := 0
+            // 区间内的标题：往上挂在窗口高点那条线上(那一行的锚点被 1.000 占着,往上挂正好错开)
+            if not na(tY) and not tMerged
+                array.push(fibMarks, label.new(x = fXd, y = tY, text = tTxt, xloc = xloc.bar_index, yloc = yloc.price, color = color.new(lnCol, 100), style = label.style_label_lower_left, textcolor = lnCol, size = fibLblSize, textalign = text.align_left))
+                gTop := na(gTop) ? tY + fRow : math.max(gTop, tY + fRow)
+                gBot := na(gBot) ? tY : math.min(gBot, tY)
+            // 区间外的两堆,各画成一个多行标签。标题并进去：下方那堆放第一行,上方那堆放最后
+            // 一行(紧挨着本列的行情区)。和区间内的块之间留半行 —— 这段空隙是估的,宁可松一点。
+            // 价格轴只按锚点缩放、不管字有多高,所以在整块字的外沿再放一个空标签占位,免得最
+            // 外面那行被窗格边截掉。
+            if dnTitle != ""
+                dnTxt := dnTxt == "" ? dnTitle : dnTitle + "\n" + dnTxt
+                nDn += 1
+            if upTitle != ""
+                upTxt := upTxt == "" ? upTitle : upTxt + "\n" + upTitle
+                nUp += 1
+            float dnEdge = na
+            // 下方那堆：尽量贴着可见区间的下沿往上长,但不碰本列区间内最低的那块
+            if nDn > 0
+                yD = math.min(fBot + nDn * fRow, (na(gBot) ? fTop : gBot) - fRow * 0.5)
+                array.push(fibMarks, label.new(x = fXd, y = yD, text = dnTxt, xloc = xloc.bar_index, yloc = yloc.price, color = color.new(lnCol, 82), style = label.style_label_upper_left, textcolor = fibColTxt, size = fibLblSize, textalign = text.align_left))
+                array.push(fibMarks, label.new(x = fXd, y = yD - nDn * fRow, text = "", xloc = xloc.bar_index, yloc = yloc.price, color = color.new(lnCol, 100), style = label.style_none))
+                dnEdge := yD
+            // 上方那堆：尽量不超出可见区间的上沿,但不碰本列区间内最高的那块、也不碰下方那堆
+            if nUp > 0
+                fFloor = na(gTop) ? dnEdge : (na(dnEdge) ? gTop : math.max(gTop, dnEdge))
+                yU = math.max(fTop - nUp * fRow, na(fFloor) ? fBot : fFloor + fRow * 0.5)
+                array.push(fibMarks, label.new(x = fXd, y = yU, text = upTxt, xloc = xloc.bar_index, yloc = yloc.price, color = color.new(lnCol, 82), style = label.style_label_lower_left, textcolor = fibColTxt, size = fibLblSize, textalign = text.align_left))
+                array.push(fibMarks, label.new(x = fXd, y = yU + nUp * fRow, text = "", xloc = xloc.bar_index, yloc = yloc.price, color = color.new(lnCol, 100), style = label.style_none))
 // ============================================================
 // 6) Divergence for Many Indicators   (v4 -> v6 转换)
 //    © LonesomeTheBlue — Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/)

@@ -33,6 +33,10 @@
 //   越过目标、还在走   取下一档延长目标（浪3 1.618→2.618、浪5 1.0→1.618 ……）
 //   越过目标、已回头   暂按「这一浪在极值处走完」处理，从极值处接下一浪，标签带「?」
 //
+// 推演所接的这组浪，已经走过的部分（起点 0 → 走完的每一浪 → 正在走的那一浪到目前的极值）
+// 用半透明实线画出来 —— 否则图上只剩一个「(1)?」标签，看不出这一浪从哪里起。
+// 几个级别推演完全相同时只画一条，标签写共用名「中·粗」。
+//
 // ⚠ 推演只在最后一根上画，**每根都会重算**。ZigZag 是路径依赖的，加载更多历史
 //   后整串枢轴可能挪位。推演是规则的机械推论，不是信号。
 // =============================================================================
@@ -108,6 +112,12 @@ retB = input.float(0.618, "高度 · B 回撤 A", minval = 0.1, maxval = 0.99, s
 projRay = input.bool(true, "在推演终点价画水平射线", group = gP,
      tooltip = "从推演终点往右延伸。旧版从当前K线画起，终点价离现价远时（比如 +52%）" +
                "会把整张图的纵轴撑开、K线被压扁；现在从终点画起，不影响当前视图。")
+showPast = input.bool(true, "标出推演所接的这组浪已走过的部分", group = gP,
+     tooltip = "推演是接着「当前这组浪」往后画的。打开后，这组浪的起点（标 0）、已经走完的每一浪、" +
+               "和正在走的那一浪（画到目前的极值）用半透明实线连起来，标上浪名 —— " +
+               "能直接看到推演是从哪里接上的。\n\n" +
+               "它和已确认的 1-5 不是一回事：已确认的是不透明实线，不会再变；" +
+               "这组浪还没走完，只是当前的数法，每根都会重算。")
 
 gS = "④ 样式"
 // TradingView 的「样式」标签页只收 plot/plotshape 这类输出，line/label/box 这种
@@ -173,6 +183,7 @@ type Wave
     float p5px       // 浪5 终点价：收盘越过它 = 这组浪其实没走完，调整目标作废
     float tgtPx      // ABC 调整目标（样式页那条线用）
     bool  expired
+    int   b0         // P0 所在 bar：推演所接的这组浪就是它的时候，已走过的 1-5 不再重画
 
 type Lv
     string       name
@@ -200,25 +211,28 @@ type Lv
     string       note2    // 状态表：推演终点
     string       tip      // 状态表：悬停浮窗里的完整推演明细
     array<string> dCells  // 状态表：「直接显示」模式的明细，每行 5 格摊平存
+    int          li       // 级别序号 0 / 1 / 2：同一个点上几个级别的标签左右错开
+    string       tag      // 推演标签上写的级别名。几个级别共用一条推演时是「中·粗」这样
+    string       dupOf    // 推演和哪个级别完全相同（相同就不重复画），没有是 ""
 
 var Lv LA = Lv.new(name = "细", mult = useA, col = cA, wid = wA, on = onA, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
      sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
-     dCells = array.new<string>())
+     dCells = array.new<string>(), li = 0, tag = "细", dupOf = "")
 var Lv LB = Lv.new(name = "中", mult = useB, col = cB, wid = wB, on = onB, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
      sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
-     dCells = array.new<string>())
+     dCells = array.new<string>(), li = 1, tag = "中", dupOf = "")
 var Lv LC = Lv.new(name = "粗", mult = useC, col = cC, wid = wC, on = onC, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
      sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
-     dCells = array.new<string>())
+     dCells = array.new<string>(), li = 2, tag = "粗", dupOf = "")
 
 // ZigZag 单步。返回：本根是否**确认**了一个新枢轴。
 // 确认条件是收盘价从当前腿的极值反向走出 thr —— 收盘才算，所以枢轴一旦确认
@@ -350,7 +364,7 @@ method detect(Lv L) =>
             Wave w = Wave.new(segs = array.new<line>(), lbs = array.new<label>(),
                  bull = bull, p5px = p5.price,
                  tgtPx = bull ? p5.price - full * projRetr : p5.price + full * projRetr,
-                 expired = false)
+                 expired = false, b0 = p0.bi)
 
             array.push(w.segs, line.new(p0.bi, p0.price, p1.bi, p1.price,
                  xloc = xloc.bar_index, color = L.col, width = L.wid))
@@ -413,6 +427,16 @@ method activeTgt(Lv L) =>
                 t := w.tgtPx
     t
 
+// 图上还留着一组从 bar b 起的已确认 1-5 吗
+method hasWave(Lv L, int b) =>
+    bool f = false
+    if array.size(L.ws) > 0
+        for i = 0 to array.size(L.ws) - 1
+            Wave w = array.get(L.ws, i)
+            if w.b0 == b
+                f := true
+    f
+
 // ───────────────────────────────────────────────────────── 5. 场景推演
 //
 // 周期里的第 j 段：0..7 = 1 2 3 4 5 A B C，8..9 = 下一轮的 1 2。
@@ -425,6 +449,16 @@ scName(int j) =>
 // 推动型的腿（1 3 5 A C 和下一轮的 1），和调整型的腿（2 4 B）分开算速度
 scImp(int j) =>
     j == 0 or j == 2 or j == 4 or j == 5 or j == 7 or j == 8
+
+// 推演标签的样式。大转折在每个级别都是枢轴，几个级别的标签会叠在同一个点上 ——
+// 细居中，中往右偏，粗往左偏。top = 标签在点的上方（这个点是高点）
+lblSt(bool top, int li) =>
+    string st = top ? label.style_label_down : label.style_label_up
+    if li == 1
+        st := top ? label.style_label_lower_left : label.style_label_upper_left
+    else if li == 2
+        st := top ? label.style_label_lower_right : label.style_label_upper_right
+    st
 
 // 「现在正在走第 k 段」这个解读成立吗？
 // 要求：最近 k+1 个枢轴能当作 P0..Pk，方向交替、时间递增，走完的部分全部合规，
@@ -733,14 +767,52 @@ method scenario(Lv L) =>
         // ── 5. 画
         color c = L.col
         bool fullLbl = direct or projLbl != "浪名"
+        string pre = fullLbl ? L.tag + " " : ""
+        // 推演接的这组浪已经走过的部分：起点 0 → 走完的每一浪 → 正在走的那一浪（画到目前的极值）。
+        // 不画这段的话，图上只剩极值处一个「(1)?」标签，看不出这一浪从哪里起、推演从哪里接上。
+        if showPast
+            color cP = color.new(c, 35)
+            // 这组浪的 1-5 正好是图上一组已确认的推动浪 → 那五段已经画着了，只从浪5 终点往后画
+            int jFrom = kk >= 5 and L.hasWave(q0.bi) ? 5 : 0
+            string tip0 = "级别「" + L.tag + "」 · 推演所接的这组浪 · 起点 0\n"
+                 + str.tostring(q0.price, format.mintick)
+                 + "\n\n从这里数：已走完 " + str.tostring(kk) + " 浪，现在在 " + scName(kk) + "。"
+                 + "\n半透明实线是这组浪已经走过的部分；它还没走完，只是当前的数法，每根都会重算。"
+            if jFrom == 0
+                array.push(L.sB, label.new(q0.bi, q0.price, pre + "0", xloc = xloc.bar_index,
+                     style = lblSt(q0.isHigh, L.li),
+                     color = color.new(c, 55), textcolor = color.white, size = szLbl, tooltip = tip0))
+            int   bPrev = q0.bi
+            float yPrev = q0.price
+            for j = 0 to kk
+                int   bj = L.extBi
+                float yj = L.ext
+                if j < kk
+                    Piv qj = array.get(L.pv, n - kk + j)
+                    bj := qj.bi
+                    yj := qj.price
+                if j >= jFrom
+                    array.push(L.sL, line.new(bPrev, yPrev, bj, yj, xloc = xloc.bar_index,
+                         color = cP, style = line.style_solid, width = pWidth))
+                if j < kk and j >= jFrom
+                    float dj = yj - yPrev
+                    string tipJ = "级别「" + L.tag + "」 · 推演所接的这组浪 · " + scName(j) + "（已走完）"
+                         + "\n终点 " + str.tostring(yj, format.mintick)
+                         + "\n这一浪 " + (dj >= 0 ? "+" : "") + str.tostring(dj, format.mintick)
+                         + "（" + (dj >= 0 ? "+" : "") + str.tostring(dj / yPrev * 100, "#.#") + "%）/ "
+                         + str.tostring(bj - bPrev) + " 根"
+                    array.push(L.sB, label.new(bj, yj, pre + scName(j), xloc = xloc.bar_index,
+                         style = lblSt((j % 2 == 0) == bull, L.li),
+                         color = color.new(c, 55), textcolor = color.white, size = szLbl, tooltip = tipJ))
+                bPrev := bj
+                yPrev := yj
         if done
-            string tipD = "级别「" + L.name + "」 · " + scName(kk) + "?\n\n" + array.get(W, kk)
+            string tipD = "级别「" + L.tag + "」 · " + scName(kk) + "?\n\n" + array.get(W, kk)
                  + "\n\nZigZag 还没确认反转（反向还没走出 ATR×" + str.tostring(L.mult)
                  + "），所以这是假设：如果这一浪其实还在延长，下一根会重算。"
-            array.push(L.sB, label.new(L.extBi, L.ext,
-                 (fullLbl ? L.name + " " : "") + scName(kk) + "?",
+            array.push(L.sB, label.new(L.extBi, L.ext, pre + scName(kk) + "?",
                  xloc = xloc.bar_index,
-                 style = (kk % 2 == 0) == bull ? label.style_label_down : label.style_label_up,
+                 style = lblSt((kk % 2 == 0) == bull, L.li),
                  color = color.new(c, 55), textcolor = color.white, size = szLbl, tooltip = tipD))
         for di = 1 to np - 1
             int wj = array.get(pw, di)
@@ -757,7 +829,7 @@ method scenario(Lv L) =>
                  syminfo.timezone) + "（按连续交易估算）"
             int dBars = math.max(1, array.get(pt, di) - array.get(pt, di - 1))
             float dPx = y1 - y0
-            string tipP = "级别「" + L.name + "」 · 推演第 " + str.tostring(di) + " 段 · " + scName(wj)
+            string tipP = "级别「" + L.tag + "」 · 推演第 " + str.tostring(di) + " 段 · " + scName(wj)
                  + "\n终点 " + str.tostring(y1, format.mintick) + "   离现价 " + chgS
                  + "\n" + when
                  + "\n\n高度：" + array.get(W, wj)
@@ -767,10 +839,10 @@ method scenario(Lv L) =>
                  + str.tostring(scImp(wj) ? vImp : vCor, format.mintick) + " / 根）"
             string lblTxt = scName(wj)
             if fullLbl
-                lblTxt := L.name + " " + scName(wj) + "  " + str.tostring(y1, format.mintick) + "  " + chgS
+                lblTxt := L.tag + " " + scName(wj) + "  " + str.tostring(y1, format.mintick) + "  " + chgS
             array.push(L.sB, label.new(array.get(pt, di), y1, lblTxt,
                  xloc = xloc.bar_index,
-                 style = (wj % 2 == 0) == bull ? label.style_label_down : label.style_label_up,
+                 style = lblSt((wj % 2 == 0) == bull, L.li),
                  color = color.new(c, 25), textcolor = color.white, size = szLbl, tooltip = tipP))
         float yEnd = s * array.get(px, np - 1)
         if projRay
@@ -784,6 +856,9 @@ method scenario(Lv L) =>
         L.sK  := kk
         L.sP0 := q0.bi
         string pos = scName(kk) + (done ? (extd ? "? 越过延长档" : "? 越过目标·已回头") : extd ? " 延长中" : " 进行中")
+        // 新一轮的浪1 没有目标可越过：前面没有可数的浪，只能假设它在当前极值处走完
+        if kk == 0
+            pos := scName(0) + "? 新一轮·暂按极值走完"
         // 浪2 回撤过深的计数很脆弱（合法，但离作废只差一点），直说
         float l1v = array.get(E, 0) - x0
         if (kk >= 2 or (kk == 1 and done)) and l1v > 0
@@ -823,10 +898,11 @@ method scenario(Lv L) =>
         array.push(L.dCells, str.tostring(vCor, format.mintick) + "/根")
 
         // ── 7. 悬停明细：表里的字很小，鼠标移到这一行上弹出的浮窗是正常字号
-        string tp = "当前位置：" + pos + "\n\n推演路径（从现在起）："
+        string tp = "当前位置：" + pos + "\n这组浪的起点 0：" + str.tostring(q0.price, format.mintick)
+             + "\n\n推演路径（从现在起）："
         if done
             tp := tp + "\n  " + scName(kk) + "?   " + str.tostring(L.ext, format.mintick)
-                 + "   越过目标、已回头，暂按在这里走完"
+                 + (kk == 0 ? "   没有更早的参照，暂按在当前极值走完" : "   越过目标、已回头，暂按在这里走完")
         else
             tp := tp + "\n  现在   " + str.tostring(close, format.mintick)
         for hi = 1 to np - 1
@@ -870,36 +946,43 @@ LA.sweep()
 LB.sweep()
 LC.sweep()
 
+// 两个级别选中了同一个起点、同一个位置时，推出来的路径完全一样 —— 只画更细的那个 K，
+// 它的标签改写成共用的名字（「中·粗」），被合并的 L 在状态表里注明画在哪。
+method mergeInto(Lv L, Lv K) =>
+    L.clearScen()
+    L.dupOf := K.name
+    L.note  := "同「" + K.name + "」的场景，不重复画"
+    L.note2 := ""
+    L.tip   := "和「" + K.name + "」选中了同一个起点和位置，推演路径完全一样，"
+         + "图上只画一条，标签写「" + K.tag + "·" + L.name + "」。\n\n" + K.tip
+    L.dCells := array.copy(K.dCells)
+    K.tag := K.tag + "·" + L.name
+
 // 场景推演只在最后一根上画（它只在「现在」有意义）。
-// 两个级别选中了同一个起点、同一个位置时，推出来的路径完全一样 —— 只画更细的那个。
 if showProj and barstate.islast
+    LA.tag := LA.name
+    LB.tag := LB.name
+    LC.tag := LC.name
+    LA.dupOf := ""
+    LB.dupOf := ""
+    LC.dupOf := ""
     if LA.on
         LA.scenario()
     if LB.on
         LB.scenario()
         if LA.on and LB.sK >= 0 and LB.sK == LA.sK and LB.sP0 == LA.sP0
-            LB.clearScen()
-            LB.note := "同「" + LA.name + "」的场景，不重复画"
-            LB.note2 := ""
-            LB.tip := "和「" + LA.name + "」选中了同一个起点和位置，推演路径完全一样，"
-                 + "图上只画「" + LA.name + "」那条。\n\n" + LA.tip
-            LB.dCells := array.copy(LA.dCells)
+            LB.mergeInto(LA)
     if LC.on
         LC.scenario()
         if LA.on and LC.sK >= 0 and LC.sK == LA.sK and LC.sP0 == LA.sP0
-            LC.clearScen()
-            LC.note := "同「" + LA.name + "」的场景，不重复画"
-            LC.note2 := ""
-            LC.tip := "和「" + LA.name + "」选中了同一个起点和位置，推演路径完全一样，"
-                 + "图上只画「" + LA.name + "」那条。\n\n" + LA.tip
-            LC.dCells := array.copy(LA.dCells)
+            LC.mergeInto(LA)
         else if LB.on and LC.sK >= 0 and LC.sK == LB.sK and LC.sP0 == LB.sP0
-            LC.clearScen()
-            LC.note := "同「" + LB.name + "」的场景，不重复画"
-            LC.note2 := ""
-            LC.tip := "和「" + LB.name + "」选中了同一个起点和位置，推演路径完全一样，"
-                 + "图上只画「" + LB.name + "」那条。\n\n" + LB.tip
-            LC.dCells := array.copy(LB.dCells)
+            LC.mergeInto(LB)
+    // 有别的级别并进来的，重画一次，标签换成共用的名字
+    if LA.on and LA.tag != LA.name
+        LA.scenario()
+    if LB.on and LB.dupOf == "" and LB.tag != LB.name
+        LB.scenario()
 
 float tgtA = LA.on ? LA.activeTgt() : na
 float tgtB = LB.on ? LB.activeTgt() : na
@@ -949,8 +1032,10 @@ if showTbl and barstate.islast
     LB.tblRow(tb, 2, useB)
     LC.tblRow(tb, 3, useC)
     string fTip = "图上共 " + str.tostring(bar_index + 1) + " 根K线。\n\n"
-         + "「?」= 这一浪已越过斐波那契目标、价格也已回头，暂按「在极值处走完」往下推。"
-         + "ZigZag 还没确认反转，所以这只是假设。\n\n"
+         + "「?」= 暂按「这一浪在极值处走完」往下推：要么它已越过斐波那契目标、价格也已回头，"
+         + "要么它是新一轮的浪1、前面没有可数的浪。ZigZag 还没确认反转，所以这只是假设。\n\n"
+         + "半透明实线 + 0、(1)… = 推演所接的这组浪已经走过的部分。\n"
+         + "几个级别推演相同时只画一条，标签写「中·粗」这样的共用名。\n\n"
          + "推演只在最后一根上画，每来一根新K线都会重新判断位置、重画路径。\n\n"
          + "推演是规则的机械推论，不是信号。"
     table.cell(tb, 0, 4, "⚠", text_color = color.orange, text_size = szT, tooltip = fTip)
@@ -958,7 +1043,7 @@ if showTbl and barstate.islast
          tooltip = fTip)
     table.cell(tb, 2, 4, direct ? "明细见下方" : "悬停看明细", text_color = color.orange, text_size = szT,
          tooltip = fTip)
-    table.cell(tb, 3, 4, "? = 越过目标已回头，暂按走完", text_color = color.orange, text_size = szT,
+    table.cell(tb, 3, 4, "? = 暂按极值处走完（假设）", text_color = color.orange, text_size = szT,
          text_halign = text.align_left, tooltip = fTip)
     table.cell(tb, 4, 4, "推演是推论，不是信号", text_color = color.orange, text_size = szT,
          text_halign = text.align_left, tooltip = fTip)
@@ -975,7 +1060,9 @@ if showTbl and barstate.islast
         table.cell(tb, 1, 5, "价位",           text_color = color.silver, text_size = szT)
         table.cell(tb, 2, 5, "离现价",         text_color = color.silver, text_size = szT)
         table.cell(tb, 3, 5, "约几根后 · 日期", text_color = color.silver, text_size = szT)
-        table.cell(tb, 4, 5, "依据",           text_color = color.silver, text_size = szT)
+        // 这个级别和别的级别推演相同时，图上只画了那一条，标签写的是「中·粗」这样的共用名
+        table.cell(tb, 4, 5, D.dupOf != "" ? "依据 · 线画在「" + D.dupOf + "」" : "依据",
+             text_color = color.silver, text_size = szT)
         int nd = int(array.size(D.dCells) / 5)
         if not D.on
             table.cell(tb, 0, 6, "这个级别没开", text_color = color.silver, text_size = szT)

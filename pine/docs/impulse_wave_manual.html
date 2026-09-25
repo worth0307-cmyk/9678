@@ -144,7 +144,7 @@ section[id]{ scroll-margin-top:16px; }
   <h1><code>impulse_wave</code> 使用说明</h1>
   <p class="lede">这个 TradingView 指标用三个尺度数艾略特推动浪：把历史上已经走完的 1-2-3-4-5 画出来，再判断现在处在周期的哪一浪，按斐波那契比例和实测速度往后画几段推演。</p>
   <div class="meta">
-    <span><b>代码版本</b> add5194</span>
+    <span><b>代码版本</b> 2026-09-25</span>
     <span><b>文中所有图</b> 用仓库 BTCUSDT 永续 4 小时数据渲染，截至 2026-09-10 08:00</span>
     <span><b>适用</b> Pine Script v6</span>
   </div>
@@ -615,6 +615,17 @@ section[id]{ scroll-margin-top:16px; }
 <text x="509.6" y="23.0" font-size="10.5" fill="#ffffff" text-anchor="middle">(5)</text>
 <line x1="570.3" x2="622.2" y1="252.8" y2="252.8" stroke="#ab47bc" stroke-width="1.5" opacity="1.0"/>
 <polygon points="564.3,118.6 576.3,118.6 570.3,108.6" fill="#26a69a"/>
+<polyline points="561.6,72.1 590.5,136.2 604.9,89.5 622.2,135.1" fill="none" stroke="#42a5f5" stroke-width="2" opacity="0.65" stroke-linejoin="round"/>
+<rect x="553.5" y="48.6" width="16.3" height="17.5" rx="3" fill="#42a5f5" opacity="0.45"/>
+<polygon points="557.6,66.1 565.6,66.1 561.6,71.1" fill="#42a5f5" opacity="0.45"/>
+<text x="561.6" y="61.1" font-size="10.5" fill="#ffffff" text-anchor="middle">0</text>
+<rect x="576.0" y="142.2" width="28.9" height="17.5" rx="3" fill="#42a5f5" opacity="0.45"/>
+<polygon points="586.5,142.2 594.5,142.2 590.5,137.2" fill="#42a5f5" opacity="0.45"/>
+<text x="590.5" y="154.7" font-size="10.5" fill="#ffffff" text-anchor="middle">(1)</text>
+<rect x="590.5" y="66.0" width="28.9" height="17.5" rx="3" fill="#42a5f5" opacity="0.45"/>
+<polygon points="600.9,83.5 608.9,83.5 604.9,88.5" fill="#42a5f5" opacity="0.45"/>
+<text x="604.9" y="78.5" font-size="10.5" fill="#ffffff" text-anchor="middle">(2)</text>
+<polyline points="509.6,34.0 590.5,136.2" fill="none" stroke="#ab47bc" stroke-width="2" opacity="0.65" stroke-linejoin="round"/>
 <polyline points="622.2,131.5 645.3,193.2 656.9,153.6 680.0,217.7 700.2,165.0" fill="none" stroke="#42a5f5" stroke-width="2" stroke-dasharray="6 4" opacity="1.0" stroke-linejoin="round"/>
 <rect x="630.9" y="199.2" width="28.9" height="17.5" rx="3" fill="#42a5f5" opacity="0.9"/>
 <polygon points="641.3,199.2 649.3,199.2 645.3,194.2" fill="#42a5f5" opacity="0.9"/>
@@ -692,8 +703,8 @@ section[id]{ scroll-margin-top:16px; }
     <li><span class="mark">1</span><div><strong>已确认的推动浪</strong>：<span class="lv2">中</span>级别在 08-01 到 09-03 之间走完了一组看涨 1-5，用实线连起来，每个转折点标 (1)…(5)。这是已经发生的事实，不会再变。</div></li>
     <li><span class="mark">2</span><div><strong>绿色三角</strong>：这一根K线确认了上面那组 1-5。它比 (5) 晚了 21 根，因为要等价格从高点回撤够一个阈值，才能确认 (5) 是顶。</div></li>
     <li><span class="mark">3</span><div><strong>紫色横线</strong>：这组推动浪之后的 ABC 调整目标，72,256。从三角那根开始画，价格碰到它或者收盘站上 (5) 的高点，线就断开。详见 <a href="#target">第 05 节</a>。</div></li>
-    <li><span class="mark">4</span><div><strong>蓝色虚线</strong>：<span class="lv1">细</span>级别的场景推演。它判断现在在走一组小的看跌推动浪的第 (3) 浪，往后画 (3) (4) (5) A 四段。</div></li>
-    <li><span class="mark">5</span><div><strong>紫色虚线</strong>：<span class="lv2">中</span>级别的场景推演。它判断 (5) 已经走完、现在在走调整浪 A，往后画 A B C 和下一轮的 (1)′。</div></li>
+    <li><span class="mark">4</span><div><strong>蓝色虚线</strong>：<span class="lv1">细</span>级别的场景推演。它判断现在在走一组小的看跌推动浪的第 (3) 浪：半透明实线和淡色标签 0、(1)、(2) 是这组浪已经走过的部分，虚线从现在往后画 (3) (4) (5) A 四段。</div></li>
+    <li><span class="mark">5</span><div><strong>紫色虚线</strong>：<span class="lv2">中</span>级别的场景推演。它判断 (5) 已经走完、现在在走调整浪 A，往后画 A B C 和下一轮的 (1)′。这组浪的 0-(5) 就是编号 1 那组已确认的推动浪，所以不重画，只把 (5) 之后已经走出来的这段 A 画成半透明实线。</div></li>
     <li><span class="mark">6</span><div><strong>状态表</strong>：每个级别一行，写着阈值、枢轴数、现在在哪一浪、推演终点。字很小，鼠标移上去会弹出完整明细。</div></li>
   </ol>
 </section>
@@ -707,8 +718,10 @@ section[id]{ scroll-margin-top:16px; }
       <tr><td class="k"><span class="swatch" style="color:var(--lv2)"></span>实线 + (1)…(5)</td><td>历史上已经走完、通过全部规则的一组推动浪。浪3 长度达到浪1 的 1.618 倍时，浪3 那段加粗、标签加 ★</td><td>不变</td></tr>
       <tr><td class="k">▲ 绿 / ▼ 红三角</td><td>确认了一组看涨 / 看跌 1-5 的那一根K线</td><td>不变</td></tr>
       <tr><td class="k"><span class="swatch" style="color:var(--lv2)"></span>细横线</td><td>已确认推动浪的 ABC 调整目标。价格碰到或收盘越过浪5 终点就断开</td><td>断开后不再画</td></tr>
+      <tr><td class="k"><span class="swatch" style="color:var(--lv1);opacity:.6"></span>半透明实线 + 0、(1)…</td><td>推演所接的这组浪已经走过的部分：起点 0、走完的每一浪、正在走的那一浪（画到目前的极值）。标签颜色更淡。和已确认的 1-5 重合时不重画</td><td><strong>每根都重算</strong></td></tr>
       <tr><td class="k"><span class="swatch dash" style="color:var(--lv1)"></span>虚线 + 浪名</td><td>场景推演：从现在往后的几段。标签默认只写浪名，比如 <code>A</code>、<code>(3)</code></td><td><strong>每根都重算</strong></td></tr>
-      <tr><td class="k">带 <code>?</code> 的标签</td><td>这一浪已经越过目标、价格也回头了，推演暂时当它在这里走完</td><td>每根都重算</td></tr>
+      <tr><td class="k">带 <code>?</code> 的标签</td><td>推演暂时当这一浪在极值处走完：要么它已越过目标、价格也回头了；要么它是新一轮的浪 (1)，前面没有可数的浪</td><td>每根都重算</td></tr>
+      <tr><td class="k"><code>中·粗 (2)</code> 这样的标签</td><td>几个级别的推演完全相同，只画一条，标签写所有共用它的级别。默认的「浪名」模式标签不写级别，悬停浮窗里能看到</td><td>每根都重算</td></tr>
       <tr><td class="k"><span class="swatch dot" style="color:var(--lv1)"></span>点线</td><td>推演终点价的水平射线，从推演终点往右延伸</td><td>每根都重算</td></tr>
       <tr><td class="k"><span class="swatch" style="color:var(--faint)"></span>细折线（默认关）</td><td>ZigZag 骨架：这个级别确认过的所有枢轴。调阈值时打开看</td><td>已确认的部分不变</td></tr>
     </tbody>
@@ -1198,8 +1211,17 @@ section[id]{ scroll-margin-top:16px; }
 <rect x="506.9" y="61.1" width="1.4" height="1.5" fill="#ef5350" opacity="0.55"/>
 <line x1="509.8" x2="509.8" y1="61.8" y2="65.5" stroke="#ef5350" stroke-width="1" opacity="0.55"/>
 <rect x="509.1" y="62.6" width="1.4" height="1.7" fill="#ef5350" opacity="0.55"/>
-<polyline points="-1.1,159.7 5.5,170.0 91.8,148.2 116.1,163.6 127.2,155.2 153.7,168.5 220.1,114.4 220.1,155.2 244.4,52.5 268.7,79.5 293.1,40.9 313.0,65.8 332.9,39.3 341.7,70.9 368.3,53.7 370.5,70.3 381.5,54.8 403.7,75.7 423.6,34.0 432.4,58.9 463.4,45.9 485.5,65.8 496.6,51.3" fill="none" stroke="#42a5f5" stroke-width="1.6" opacity="0.9" stroke-linejoin="round"/>
-<polyline points="496.6,51.3 509.8,65.5" fill="none" stroke="#42a5f5" stroke-width="1.2" stroke-dasharray="2 3" opacity="0.9" stroke-linejoin="round"/>
+<polyline points="-1.1,159.7 5.5,170.0 91.8,148.2 116.1,163.6 127.2,155.2 153.7,168.5 220.1,114.4 220.1,155.2 244.4,52.5 268.7,79.5 293.1,40.9 313.0,65.8 332.9,39.3 341.7,70.9 368.3,53.7 370.5,70.3 381.5,54.8 403.7,75.7 423.6,34.0 432.4,58.9 463.4,45.9 485.5,65.8 496.6,51.3" fill="none" stroke="#42a5f5" stroke-width="1" opacity="0.5" stroke-linejoin="round"/>
+<polyline points="463.4,45.9 485.5,65.8 496.6,51.3 509.8,65.5" fill="none" stroke="#42a5f5" stroke-width="2" opacity="0.65" stroke-linejoin="round"/>
+<rect x="455.2" y="22.4" width="16.3" height="17.5" rx="3" fill="#42a5f5" opacity="0.45"/>
+<polygon points="459.4,39.9 467.4,39.9 463.4,44.9" fill="#42a5f5" opacity="0.45"/>
+<text x="463.4" y="34.9" font-size="10.5" fill="#ffffff" text-anchor="middle">0</text>
+<rect x="471.0" y="71.8" width="28.9" height="17.5" rx="3" fill="#42a5f5" opacity="0.45"/>
+<polygon points="481.5,71.8 489.5,71.8 485.5,66.8" fill="#42a5f5" opacity="0.45"/>
+<text x="485.5" y="84.3" font-size="10.5" fill="#ffffff" text-anchor="middle">(1)</text>
+<rect x="482.1" y="27.8" width="28.9" height="17.5" rx="3" fill="#42a5f5" opacity="0.45"/>
+<polygon points="492.6,45.3 500.6,45.3 496.6,50.3" fill="#42a5f5" opacity="0.45"/>
+<text x="496.6" y="40.3" font-size="10.5" fill="#ffffff" text-anchor="middle">(2)</text>
 <polyline points="509.8,64.3 527.5,83.6 536.4,71.2 554.1,91.2 569.5,74.8" fill="none" stroke="#42a5f5" stroke-width="2" stroke-dasharray="6 4" opacity="1.0" stroke-linejoin="round"/>
 <rect x="513.1" y="89.6" width="28.9" height="17.5" rx="3" fill="#42a5f5" opacity="0.9"/>
 <polygon points="523.5,89.6 531.5,89.6 527.5,84.6" fill="#42a5f5" opacity="0.9"/>
@@ -1694,8 +1716,26 @@ section[id]{ scroll-margin-top:16px; }
 <rect x="506.9" y="285.1" width="1.4" height="1.5" fill="#ef5350" opacity="0.55"/>
 <line x1="509.8" x2="509.8" y1="285.8" y2="289.5" stroke="#ef5350" stroke-width="1" opacity="0.55"/>
 <rect x="509.1" y="286.6" width="1.4" height="1.7" fill="#ef5350" opacity="0.55"/>
-<polyline points="-16.6,394.3 91.8,372.2 153.7,392.5 332.9,263.3 403.7,299.7 423.6,258.0" fill="none" stroke="#ab47bc" stroke-width="1.6" opacity="0.9" stroke-linejoin="round"/>
-<polyline points="423.6,258.0 485.5,289.8" fill="none" stroke="#ab47bc" stroke-width="1.2" stroke-dasharray="2 3" opacity="0.9" stroke-linejoin="round"/>
+<polyline points="-16.6,394.3 91.8,372.2 153.7,392.5 332.9,263.3 403.7,299.7 423.6,258.0" fill="none" stroke="#ab47bc" stroke-width="1" opacity="0.5" stroke-linejoin="round"/>
+<polyline points="-16.6,394.3 91.8,372.2 153.7,392.5 332.9,263.3 403.7,299.7 423.6,258.0 485.5,289.8" fill="none" stroke="#ab47bc" stroke-width="2" opacity="0.65" stroke-linejoin="round"/>
+<rect x="-24.7" y="400.3" width="16.3" height="17.5" rx="3" fill="#ab47bc" opacity="0.45"/>
+<polygon points="-20.6,400.3 -12.6,400.3 -16.6,395.3" fill="#ab47bc" opacity="0.45"/>
+<text x="-16.6" y="412.8" font-size="10.5" fill="#ffffff" text-anchor="middle">0</text>
+<rect x="77.3" y="348.7" width="28.9" height="17.5" rx="3" fill="#ab47bc" opacity="0.45"/>
+<polygon points="87.8,366.2 95.8,366.2 91.8,371.2" fill="#ab47bc" opacity="0.45"/>
+<text x="91.8" y="361.2" font-size="10.5" fill="#ffffff" text-anchor="middle">(1)</text>
+<rect x="139.3" y="398.5" width="28.9" height="17.5" rx="3" fill="#ab47bc" opacity="0.45"/>
+<polygon points="149.7,398.5 157.7,398.5 153.7,393.5" fill="#ab47bc" opacity="0.45"/>
+<text x="153.7" y="411.0" font-size="10.5" fill="#ffffff" text-anchor="middle">(2)</text>
+<rect x="318.4" y="239.8" width="28.9" height="17.5" rx="3" fill="#ab47bc" opacity="0.45"/>
+<polygon points="328.9,257.3 336.9,257.3 332.9,262.3" fill="#ab47bc" opacity="0.45"/>
+<text x="332.9" y="252.3" font-size="10.5" fill="#ffffff" text-anchor="middle">(3)</text>
+<rect x="389.2" y="305.7" width="28.9" height="17.5" rx="3" fill="#ab47bc" opacity="0.45"/>
+<polygon points="399.7,305.7 407.7,305.7 403.7,300.7" fill="#ab47bc" opacity="0.45"/>
+<text x="403.7" y="318.2" font-size="10.5" fill="#ffffff" text-anchor="middle">(4)</text>
+<rect x="409.1" y="234.5" width="28.9" height="17.5" rx="3" fill="#ab47bc" opacity="0.45"/>
+<polygon points="419.6,252.0 427.6,252.0 423.6,257.0" fill="#ab47bc" opacity="0.45"/>
+<text x="423.6" y="247.0" font-size="10.5" fill="#ffffff" text-anchor="middle">(5)</text>
 <polyline points="509.8,288.3 534.2,307.3 609.4,276.8 673.5,326.1 702.3,304.0" fill="none" stroke="#ab47bc" stroke-width="2" stroke-dasharray="6 4" opacity="1.0" stroke-linejoin="round"/>
 <rect x="526.0" y="313.3" width="16.3" height="17.5" rx="3" fill="#ab47bc" opacity="0.9"/>
 <polygon points="530.2,313.3 538.2,313.3 534.2,308.3" fill="#ab47bc" opacity="0.9"/>
@@ -2191,8 +2231,17 @@ section[id]{ scroll-margin-top:16px; }
 <rect x="506.9" y="525.5" width="1.4" height="1.1" fill="#ef5350" opacity="0.55"/>
 <line x1="509.8" x2="509.8" y1="525.9" y2="528.6" stroke="#ef5350" stroke-width="1" opacity="0.55"/>
 <rect x="509.1" y="526.6" width="1.4" height="1.2" fill="#ef5350" opacity="0.55"/>
-<polyline points="-164.8,581.2 5.5,604.0 91.8,588.2 184.7,602.0" fill="none" stroke="#ffa726" stroke-width="1.6" opacity="0.9" stroke-linejoin="round"/>
-<polyline points="184.7,602.0 423.6,505.9" fill="none" stroke="#ffa726" stroke-width="1.2" stroke-dasharray="2 3" opacity="0.9" stroke-linejoin="round"/>
+<polyline points="-164.8,581.2 5.5,604.0 91.8,588.2 184.7,602.0" fill="none" stroke="#ffa726" stroke-width="1" opacity="0.5" stroke-linejoin="round"/>
+<polyline points="5.5,604.0 91.8,588.2 184.7,602.0 423.6,505.9" fill="none" stroke="#ffa726" stroke-width="2" opacity="0.65" stroke-linejoin="round"/>
+<rect x="-2.6" y="610.0" width="16.3" height="17.5" rx="3" fill="#ffa726" opacity="0.45"/>
+<polygon points="1.5,610.0 9.5,610.0 5.5,605.0" fill="#ffa726" opacity="0.45"/>
+<text x="5.5" y="622.5" font-size="10.5" fill="#ffffff" text-anchor="middle">0</text>
+<rect x="77.3" y="564.7" width="28.9" height="17.5" rx="3" fill="#ffa726" opacity="0.45"/>
+<polygon points="87.8,582.2 95.8,582.2 91.8,587.2" fill="#ffa726" opacity="0.45"/>
+<text x="91.8" y="577.2" font-size="10.5" fill="#ffffff" text-anchor="middle">(1)</text>
+<rect x="170.2" y="608.0" width="28.9" height="17.5" rx="3" fill="#ffa726" opacity="0.45"/>
+<polygon points="180.7,608.0 188.7,608.0 184.7,603.0" fill="#ffa726" opacity="0.45"/>
+<text x="184.7" y="620.5" font-size="10.5" fill="#ffffff" text-anchor="middle">(2)</text>
 <polyline points="423.6,505.9 647.0,542.6 885.8,482.0 1058.4,526.1 1224.2,498.9" fill="none" stroke="#ffa726" stroke-width="2" stroke-dasharray="6 4" opacity="1.0" stroke-linejoin="round"/>
 <rect x="406.0" y="482.4" width="35.2" height="17.5" rx="3" fill="#ffa726" opacity="0.6"/>
 <polygon points="419.6,499.9 427.6,499.9 423.6,504.9" fill="#ffa726" opacity="0.6"/>
@@ -2224,7 +2273,7 @@ section[id]{ scroll-margin-top:16px; }
 <text x="459.0" y="653" font-size="10.5" fill="#8a8f9c" text-anchor="middle">09-06</text>
 </svg></div>
     <span class="swipe">手机上可以左右滑动看图。</span>
-    <figcaption><b>图 2</b>　同一段 BTC 4 小时行情，三个级别各自的 ZigZag（实线是确认过的转折，点线是正在走的那条腿）、当前位置和推演。<span class="lv3">粗</span>默认是关的，这里打开是为了对比。</figcaption>
+    <figcaption><b>图 2</b>　同一段 BTC 4 小时行情，三个级别各自的 ZigZag（细线）、推演所接的这组浪（半透明粗线 + 淡色标签）和推演（虚线）。<span class="lv3">粗</span>默认是关的，这里打开是为了对比。</figcaption>
   </figure>
   <p>读法：三个级别都认为 82,283（09-03）是一个顶，接下来要回调到 72,000–75,000 一带。这是它们<strong>一致</strong>的部分。分歧在回调之后：</p>
   <ul>
@@ -2232,7 +2281,7 @@ section[id]{ scroll-margin-top:16px; }
     <li><span class="lv2">中</span>把同一段上涨数成完整的 1-5，所以回调是一整组 A-B-C，C 到 72,256，之后开始新的一轮。</li>
     <li><span class="lv1">细</span>只看最近几天，数的是回调里面的一组小推动浪，正在走第 (3) 浪。</li>
   </ul>
-  <p>三个级别方向一致的地方，是几种数法都支持的；方向不一致的地方，恰恰说明走势还没定。<span class="lv2">中</span>和<span class="lv3">粗</span>选中同一个起点、同一个位置时，推演一模一样，图上只画更细的那个，状态表里写「同「中」的场景，不重复画」。</p>
+  <p>三个级别方向一致的地方，是几种数法都支持的；方向不一致的地方，恰恰说明走势还没定。<span class="lv2">中</span>和<span class="lv3">粗</span>选中同一个起点、同一个位置时，推演一模一样，图上只画一条，用更细那个级别的颜色，标签写「中·粗」；状态表里<span class="lv3">粗</span>那一行写「同「中」的场景，不重复画」。手机明细选了<span class="lv3">粗</span>时，表头写「依据 · 线画在「中」」，明细里的每一个点都对应图上那条紫色的线。</p>
 </section>
 
 <section id="rules">
@@ -2868,7 +2917,8 @@ section[id]{ scroll-margin-top:16px; }
 
   <h3>判断现在在哪一浪</h3>
   <p>一个完整周期有 8 段：推动浪 1-2-3-4-5，接着调整 A-B-C。脚本对 8 个位置逐一检验：最近几个转折点能不能对上这个位置，走完的部分是否全部合规，正在走的那一段已经走出来的部分是否违规（比如正在走浪2，价格就不能已经跌破浪1 的起点）。</p>
-  <p>它从最深的位置往回试，取第一个成立的，也就是能解释最多转折点的那个。8 个都不成立时，就当作「新的一浪1 正在走」，这个解读永远成立。所以只要图上有 2 个以上的转折点，就一定有推演。</p>
+  <p>它从最深的位置往回试，取第一个成立的，也就是能解释最多转折点的那个。8 个都不成立时，就当作「新的一浪1 正在走」：从最近一个转折点起算，暂按在当前极值处走完，状态表写 <code>(1)? 新一轮·暂按极值走完</code>。这个解读永远成立，所以只要图上有 2 个以上的转折点，就一定有推演。</p>
+  <p>选中的这组浪，已经走过的部分会画成半透明实线：起点标 0，走完的每一浪标浪名，正在走的那一浪画到目前的极值。推演虚线就从这里接上。输入页 ③ 组「标出推演所接的这组浪已走过的部分」可以关掉。</p>
   <figure>
     <div class="diagram"><svg viewBox="0 0 760 260" role="img" aria-label="一个完整的艾略特周期：推动浪 1 到 5，接着调整 A、B、C；例子里现在正在走 A，实线是已经发生的，虚线是推演" font-size="12" fill="currentColor"><line x1="430" y1="26" x2="430" y2="222" stroke-dasharray="2 4" stroke-width="1" style="stroke:var(--faint)"/><text x="430" y="18" text-anchor="middle" font-weight="700">现在</text><polyline points="30,210 100,150 140,185 270,60 310,110 400,40 430,80" fill="none" stroke-width="2" stroke-linejoin="round" stroke="currentColor"/><polyline points="430,80 460,120 505,80 575,160 650,110" fill="none" stroke-width="2" stroke-linejoin="round" style="stroke:var(--lv2)" stroke-dasharray="7 5"/><circle cx="430" cy="80" r="4.5" fill="currentColor"/><text x="22" y="214" text-anchor="end" font-family="JetBrains Mono, ui-monospace, monospace">0</text><text x="100" y="140" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(1)</text><text x="140" y="205" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(2)</text><text x="270" y="50" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(3)</text><text x="310" y="130" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(4)</text><text x="400" y="30" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">(5)</text><text x="460" y="140" text-anchor="middle" font-weight="700" style="fill:var(--lv2)">A</text><text x="505" y="70" text-anchor="middle" font-weight="700" style="fill:var(--lv2)">B</text><text x="575" y="180" text-anchor="middle" font-weight="700" style="fill:var(--lv2)">C</text><text x="650" y="100" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" style="fill:var(--lv2)">(1)′</text><path d="M30,226 V232 H400 V226" fill="none" stroke-width="1" stroke="currentColor" opacity=".55"/><text x="215" y="249" text-anchor="middle" style="fill:var(--muted)">推动浪 1-2-3-4-5</text><path d="M406,226 V232 H575 V226" fill="none" stroke-width="1" stroke="currentColor" opacity=".55"/><text x="490.5" y="249" text-anchor="middle" style="fill:var(--muted)">调整 A-B-C</text><text x="650" y="249" text-anchor="middle" style="fill:var(--muted)">下一轮</text><line x1="600" y1="22" x2="630" y2="22" stroke-width="2" stroke="currentColor"/><text x="636" y="26" text-anchor="start" style="fill:var(--muted)">已经发生</text><line x1="600" y1="42" x2="630" y2="42" stroke-width="2" stroke-dasharray="7 5" style="stroke:var(--lv2)"/><text x="636" y="46" text-anchor="start" style="fill:var(--muted)">推演</text></svg></div>
     <span class="swipe">手机上可以左右滑动看图。</span>
@@ -2929,7 +2979,7 @@ section[id]{ scroll-margin-top:16px; }
         <tr><td class="c1">细</td><td class="c1">ATR×2</td><td class="c1">769 · 29</td><td class="c1">(3) 进行中</td><td class="c1">A 76,278.9 (-2%)</td></tr>
         <tr><td class="c2">中</td><td class="c2">ATR×4</td><td class="c2">243 · 4</td><td class="c2">A 进行中</td><td class="c2">(1)′ 75,509.7 (-3%)</td></tr>
         <tr><td class="c3">粗</td><td class="c3">关</td><td class="c3"></td><td class="c3"></td><td class="c3"></td></tr>
-        <tr><td class="cw">⚠</td><td class="cw">10281 根</td><td class="cw">悬停看明细</td><td class="cw">? = 越过目标已回头，暂按走完</td><td class="cw">推演是推论，不是信号</td></tr>
+        <tr><td class="cw">⚠</td><td class="cw">10281 根</td><td class="cw">悬停看明细</td><td class="cw">? = 暂按极值处走完（假设）</td><td class="cw">推演是推论，不是信号</td></tr>
       </table>
     </div>
     <figcaption><b>图 9</b>　状态表，数值来自图 1 那一刻。你图上的枢轴数和命中数会不同，因为 TradingView 加载的历史长度不同。</figcaption>
@@ -2950,7 +3000,8 @@ section[id]{ scroll-margin-top:16px; }
     <tbody>
       <tr><td class="k"><code>⚠浪2回撤98%</code></td><td>这组计数合法，但浪2 几乎回撤了整个浪1，离作废只差一点，要打折扣看</td></tr>
       <tr><td class="k"><code>⚠枢轴少 · …</code></td><td>这个级别确认的转折点不到 12 个，样本太少。多半是换了周期、又关了自动阈值</td></tr>
-      <tr><td class="k"><code>同「中」的场景，不重复画</code></td><td>和更细的级别推演完全相同，只画了一次</td></tr>
+      <tr><td class="k"><code>(1)? 新一轮·暂按极值走完</code></td><td>前面的转折点凑不成任何一个位置，当作从最近一个转折点起的新一轮浪1，暂按在当前极值处走完</td></tr>
+      <tr><td class="k"><code>同「中」的场景，不重复画</code></td><td>和更细的级别推演完全相同，只画了一条，标签写「中·粗」</td></tr>
       <tr><td class="k"><code>枢轴不足（1 个）</code></td><td>刚加载，或者阈值大到几乎没有转折</td></tr>
     </tbody>
   </table></div>
@@ -3049,6 +3100,7 @@ section[id]{ scroll-margin-top:16px; }
       <tr><td class="k">高度 · ABC 合计回撤推动浪</td><td class="d">0.5</td><td>C 的终点位置。常用 0.382 / 0.5 / 0.618。也决定那条紫色横线的价位</td></tr>
       <tr><td class="k">高度 · B 回撤 A</td><td class="d">0.618</td><td>常用 0.5 / 0.618</td></tr>
       <tr><td class="k">在推演终点价画水平射线</td><td class="d">开</td><td>从推演终点往右画一条点线</td></tr>
+      <tr><td class="k">标出推演所接的这组浪已走过的部分</td><td class="d">开</td><td>起点 0、走完的每一浪、正在走的那一浪（到目前的极值）画成半透明实线，标上浪名。和已确认的 1-5 重合的五段不重画</td></tr>
     </tbody>
   </table></div>
 
@@ -3123,7 +3175,8 @@ section[id]{ scroll-margin-top:16px; }
   <div class="answer"><span class="q">加了指标以后 K 线被压扁了。</span><p>远处的推演点、调整目标横线都会被 TradingView 自动缩放算进去。右键点价格轴，勾选「仅缩放价格图表」，之后纵轴只看K线，超出的线在图边截掉。也可以把「往后推几段」调小，或在样式页关掉调整目标横线。</p></div>
   <div class="answer"><span class="q">推演为什么隔一会儿就变了？</span><p>推演只在最后一根K线上画，每来一根新K线（实时图上每一跳）都会重新判断位置、重画路径。另外 ZigZag 是从图表最早那根开始算的，往左拖加载更多历史后，整串转折点可能挪位。已确认的 1-5 和三角不会变。</p></div>
   <div class="answer"><span class="q">为什么「命中」是 0，图上没有 (1)…(5)？</span><p>三条硬规则很严，完整的 1-5 本来就少见。先看状态表的枢轴数：少于 12 个是样本太少，检查自动阈值是否打开；枢轴够多但命中是 0，就是这段行情里确实没有合规的推动浪。推演不受影响，照样会画。</p></div>
-  <div class="answer"><span class="q">为什么「中」和「粗」只画了一个？</span><p>两个级别选中了同一个起点、同一个位置，推演完全一样，只画更细的那个。状态表里会写「同「中」的场景，不重复画」，悬停仍能看到路径。</p></div>
+  <div class="answer"><span class="q">为什么「中」和「粗」只画了一个？</span><p>两个级别选中了同一个起点、同一个位置，推演完全一样，只画一条，标签写「中·粗」。状态表里<span class="lv3">粗</span>那一行写「同「中」的场景，不重复画」，悬停仍能看到路径。</p></div>
+  <div class="answer"><span class="q">明细里「粗」的 (1) 写着「已发生」，图上怎么找不到？</span><p>「已发生」那一行就是图上的 <code>(1)?</code> 标签，在这一浪目前的极值处。<span class="lv3">粗</span>和<span class="lv2">中</span>推演相同时线只画一条，用<span class="lv2">中</span>的颜色，标签写「中·粗」，明细表头注明「线画在「中」」。这一浪本身从起点 0 到 <code>(1)?</code> 画成半透明实线。</p></div>
   <div class="answer"><span class="q">标签上的 ? 是什么？</span><p>这一浪已经越过了它的斐波那契目标，价格也回头了，推演暂时当它在这里走完。ZigZag 还没确认反转，所以是假设，见 <a href="#scenario">第 06 节</a>。</p></div>
   <div class="answer"><span class="q">状态表能拖到别的地方吗？</span><p>不能用鼠标拖，这是 Pine 的限制。在「状态表位置」里选 8 个位置之一。</p></div>
   <div class="answer"><span class="q">手机上怎么看详情？</span><p>「详情显示方式」改成「直接显示（手机）」，见 <a href="#detail">第 08 节</a>。</p></div>

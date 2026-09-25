@@ -2,6 +2,13 @@
 
 两个指标：`quasimodo_zones.pine`（QM 供需区）、`impulse_wave_12345.pine`（推动浪 1-2-3-4-5）。
 
+**粘进 TradingView 用 `impulse_wave.pine`**：它是 `impulse_wave_12345.pine` 去掉注释后的版本，
+指标标题 `impulse_wave`，代码逐行相同。改代码改带注释的那个，然后重新生成：
+
+```
+python scripts/pine_strip_comments.py pine/impulse_wave_12345.pine pine/impulse_wave.pine
+```
+
 ---
 
 ## 先说一件会反复踩到的事：输入页 vs 样式页

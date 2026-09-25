@@ -1,46 +1,7 @@
 //@version=6
-// =============================================================================
-// 推动浪 1-2-3-4-5  —  多级别 ZigZag + 艾略特规则 + 全周期场景推演
-// =============================================================================
-// 骨架：①输入 → ②枢轴序列 → ③已确认的浪 → ④检测 → ⑤场景推演 → ⑥每根维护
-//       → ⑦警报 → ⑧样式页
-//
-// 两件事分开做：
-//
-//   检测（④）  历史上**已经走完**的 1-2-3-4-5，画实线 + (1)..(5) 标签。
-//              硬规则：浪2 不破起点 / 浪3 不最短 / 浪4 不进浪1 /（可选）浪5 越过浪3。
-//
-//   推演（⑤）  **现在**处在艾略特周期 1-2-3-4-5-A-B-C 的哪一浪，从现在往后画几段。
-//              旧版只认得「正在走浪5」这一个位置，另外七个位置什么都不画 ——
-//              实测只有 0–28% 的时间画得出推演。新版对八个位置逐一检验，取能解释
-//              最多枢轴的那个。实测 BTC/ETH/SOL × 周/日/4h × 三个级别、1620 个
-//              抽样点：99.2% 画得出，剩下的都是「图上枢轴还不到 2 个」。
-//
-// 推演的高度和角度各有依据：
-//
-//   高度  每一浪的终点按艾略特常用斐波那契关系（全部可在 ③ 组调）：
-//           浪2 回撤浪1 0.618   浪3 = 1.618 × 浪1   浪4 回撤浪3 0.382
-//           浪5 = 1.0 × 浪1     ABC 合计回撤推动浪 0.5（B 回撤 A 0.618，C = A）
-//         再用硬规则夹紧：浪4 不进浪1、浪5 越过浪3、浪3 不最短、B 不越过浪5 ……
-//
-//   角度  每条腿的耗时 = 价格长度 ÷ 同类腿的实测速度。推动腿（1/3/5/A/C）和
-//         调整腿（2/4/B）分开算：本组已走完的腿各算一票，本级别最近 10 条腿的
-//         中位数也算一票（只有一条腿可参考时，不至于被它带偏）。
-//         所以推出来的浪3 和实测的浪1 一样陡，浪4 和实测的浪2 一样缓。
-//
-// 正在走的那一浪有三种情况：
-//   没到目标           从「现在」画到目标
-//   越过目标、还在走   取下一档延长目标（浪3 1.618→2.618、浪5 1.0→1.618 ……）
-//   越过目标、已回头   暂按「这一浪在极值处走完」处理，从极值处接下一浪，标签带「?」
-//
-// ⚠ 推演只在最后一根上画，**每根都会重算**。ZigZag 是路径依赖的，加载更多历史
-//   后整串枢轴可能挪位。推演是规则的机械推论，不是信号。
-// =============================================================================
 
 indicator("impulse_wave", "Impulse 1-5", overlay = true,
      max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
-
-// ───────────────────────────────────────────────────────── 1. 输入
 
 gZ = "① ZigZag（ATR 反转阈值）"
 tfAuto = input.bool(true, "阈值按周期自动缩放（推荐）", group = gZ,
@@ -64,7 +25,6 @@ onC = input.bool(false, "启用级别「粗」", group = gZ,
      tooltip = "级别原来叫 A / B / C，现在改叫 细 / 中 / 粗 —— 因为推演会画出调整浪 A、B、C，" +
                "「B 级别的 A 浪」这种标签没法读。")
 
-// 按图表周期挑倍数。分档依据是「多少根K线」，不是「多大幅度」
 tfSec = timeframe.in_seconds()
 autoA = tfSec >= 2592000 ? 0.25 : tfSec >= 604800 ? 0.5 : tfSec >= 14400 ? 2.0 : 3.0
 autoB = tfSec >= 2592000 ? 0.50 : tfSec >= 604800 ? 1.0 : tfSec >= 14400 ? 4.0 : 6.0
@@ -110,8 +70,6 @@ projRay = input.bool(true, "在推演终点价画水平射线", group = gP,
                "会把整张图的纵轴撑开、K线被压扁；现在从终点画起，不影响当前视图。")
 
 gS = "④ 样式"
-// TradingView 的「样式」标签页只收 plot/plotshape 这类输出，line/label/box 这种
-// 绘图对象改不了颜色线宽 —— 所以放在输入页这一组。
 cA = input.color(#42a5f5, "级别「细」颜色", group = gS, inline = "A")
 wA = input.int(2, "线宽", minval = 1, maxval = 6, group = gS, inline = "A")
 cB = input.color(#ab47bc, "级别「中」颜色", group = gS, inline = "B")
@@ -146,8 +104,6 @@ detailMode = input.string("悬停浮窗（电脑）", "详情显示方式", opti
                "注意：指标设置跟着图表布局走，会在电脑和手机之间同步。")
 detailLv = input.string("细", "直接显示时列出哪个级别", options = ["细", "中", "粗"], group = gS)
 
-// ATR 前 atrLen 根是 na。兜底成 10 个 tick 会让阈值近乎为零、开头几根疯狂确认枢轴，
-// 所以宁可等 ATR 有效再开始滚。
 atrRaw = ta.atr(atrLen)
 atrOk  = not na(atrRaw)
 atrV   = nz(atrRaw, syminfo.mintick * 10.0)
@@ -158,20 +114,17 @@ posT  = tblPos == "右上" ? position.top_right : tblPos == "右中" ? position.
 direct = detailMode == "直接显示（手机）"
 stPrj = pStyle == "实线" ? line.style_solid : pStyle == "点线" ? line.style_dotted : line.style_dashed
 
-// ───────────────────────────────────────────────────────── 2. 枢轴序列
-
 type Piv
     float price
     int   bi
     bool  isHigh
 
-// 一组已确认的 1-5（历史记录）
 type Wave
     array<line>  segs
     array<label> lbs
     bool  bull
-    float p5px       // 浪5 终点价：收盘越过它 = 这组浪其实没走完，调整目标作废
-    float tgtPx      // ABC 调整目标（样式页那条线用）
+    float p5px
+    float tgtPx
     bool  expired
 
 type Lv
@@ -180,26 +133,26 @@ type Lv
     color        col
     int          wid
     bool         on
-    int          dir      // +1 = 正在跟踪上升腿（找高点）, −1 = 下降腿, 0 = 还没定
-    float        ext      // 当前腿的极值（播种期 = 跟踪中的高点）
+    int          dir
+    float        ext
     int          extBi
-    float        ext2     // 只在播种期用：跟踪中的低点
+    float        ext2
     int          ext2Bi
     array<Piv>   pv
     array<Wave>  ws
     array<line>  zz
     int          hits
-    int          lastDir  // 最近一次命中的方向：+1 看涨, −1 看跌
-    int          pvTotal  // 累计确认的枢轴数。L.pv 只保留最近 24 个，不能拿来显示
-    array<line>  sL       // 场景推演：折线
-    array<label> sB       // 场景推演：各点标签
-    line         sRay     // 场景推演：终点价水平射线
-    int          sK       // 场景推演选中的位置（跨级别去重用）
-    int          sP0      // 场景推演的起点枢轴所在 bar（跨级别去重用）
-    string       note     // 状态表：当前位置
-    string       note2    // 状态表：推演终点
-    string       tip      // 状态表：悬停浮窗里的完整推演明细
-    array<string> dCells  // 状态表：「直接显示」模式的明细，每行 5 格摊平存
+    int          lastDir
+    int          pvTotal
+    array<line>  sL
+    array<label> sB
+    line         sRay
+    int          sK
+    int          sP0
+    string       note
+    string       note2
+    string       tip
+    array<string> dCells
 
 var Lv LA = Lv.new(name = "细", mult = useA, col = cA, wid = wA, on = onA, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
@@ -220,14 +173,10 @@ var Lv LC = Lv.new(name = "粗", mult = useC, col = cC, wid = wC, on = onC, dir 
      sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
      dCells = array.new<string>())
 
-// ZigZag 单步。返回：本根是否**确认**了一个新枢轴。
-// 确认条件是收盘价从当前腿的极值反向走出 thr —— 收盘才算，所以枢轴一旦确认
-// 就不会被后来的行情抹掉（极值点本身在过去，不需要未来数据）。
 method zigzag(Lv L, float thr) =>
     bool confirmed = false
 
     if L.dir == 0
-        // 播种期：**同时**跟踪最高和最低，谁先反向走出 thr 谁定方向。
         if na(L.ext)
             L.ext    := high
             L.extBi  := bar_index
@@ -278,7 +227,6 @@ method zigzag(Lv L, float thr) =>
     if array.size(L.pv) > 24
         array.shift(L.pv)
 
-    // ZigZag 骨架（只为调阈值用，默认关）
     if confirmed and showZZ and array.size(L.pv) >= 2
         Piv q0 = array.get(L.pv, array.size(L.pv) - 2)
         Piv q1 = array.get(L.pv, array.size(L.pv) - 1)
@@ -288,8 +236,6 @@ method zigzag(Lv L, float thr) =>
             line.delete(array.shift(L.zz))
     confirmed
 
-// ───────────────────────────────────────────────────────── 3. 已确认的浪
-
 delWave(Wave w) =>
     if array.size(w.segs) > 0
         for i = 0 to array.size(w.segs) - 1
@@ -298,11 +244,6 @@ delWave(Wave w) =>
         for i = 0 to array.size(w.lbs) - 1
             label.delete(array.get(w.lbs, i))
 
-// ───────────────────────────────────────────────────────── 4. 检测（历史上已走完的 1-5）
-
-// 最近 6 个交替枢轴 P0..P5：
-//   看涨  低 高 低 高 低 高      浪1 = P0→P1 ... 浪5 = P4→P5
-//   看跌  高 低 高 低 高 低      完全镜像
 method detect(Lv L) =>
     bool found = false
     int n = array.size(L.pv)
@@ -323,12 +264,11 @@ method detect(Lv L) =>
         float l3 = math.abs(p3.price - p2.price)
         float l5 = math.abs(p5.price - p4.price)
 
-        bool r2 = bull ? p2.price > p0.price : p2.price < p0.price   // 浪2 不跌破起点
-        bool r3 = not (l3 < l1 and l3 < l5)                          // 浪3 不是最短
+        bool r2 = bull ? p2.price > p0.price : p2.price < p0.price
+        bool r3 = not (l3 < l1 and l3 < l5)
         float tol = l1 * ovTol
-        bool r4 = bull ? p4.price > p1.price - tol : p4.price < p1.price + tol   // 浪4 不进浪1
+        bool r4 = bull ? p4.price > p1.price - tol : p4.price < p1.price + tol
         bool r5 = not need5 or (bull ? p5.price > p3.price : p5.price < p3.price)
-        // 六个点必须落在六根不同的K线上（一根大K线可以同时贡献高点和低点）
         bool rBi = p1.bi > p0.bi and p2.bi > p1.bi and p3.bi > p2.bi
                      and p4.bi > p3.bi and p5.bi > p4.bi
         bool rSpan = maxSpan == 0 or (p5.bi - p0.bi) <= maxSpan
@@ -340,7 +280,6 @@ method detect(Lv L) =>
             bool star = fibOn and l3 >= fibN * l1
             int  wThick = star ? L.wid + starW : L.wid
 
-            // 新的一组确认之后，旧的那组的调整目标就作废了
             if array.size(L.ws) > 0
                 for i = 0 to array.size(L.ws) - 1
                     Wave wo = array.get(L.ws, i)
@@ -392,8 +331,6 @@ method detect(Lv L) =>
                 delWave(array.shift(L.ws))
     found
 
-// 已确认那组的调整目标什么时候作废：价格**到达**目标（兑现了），或者收盘**越过浪5
-// 终点**（说明浪5 其实没走完）。旧版按时间过期，和价格无关，不合逻辑。
 method sweep(Lv L) =>
     if array.size(L.ws) > 0
         for i = 0 to array.size(L.ws) - 1
@@ -413,22 +350,12 @@ method activeTgt(Lv L) =>
                 t := w.tgtPx
     t
 
-// ───────────────────────────────────────────────────────── 5. 场景推演
-//
-// 周期里的第 j 段：0..7 = 1 2 3 4 5 A B C，8..9 = 下一轮的 1 2。
-// 所有计算在「归一化」价格上做：x = s × price，s = 看涨 +1 / 看跌 −1。
-// 这样推动方向永远是「向上」，看涨看跌共用同一套公式和比较方向。
-
 scName(int j) =>
     j == 0 ? "(1)" : j == 1 ? "(2)" : j == 2 ? "(3)" : j == 3 ? "(4)" : j == 4 ? "(5)" : j == 5 ? "A" : j == 6 ? "B" : j == 7 ? "C" : j == 8 ? "(1)′" : "(2)′"
 
-// 推动型的腿（1 3 5 A C 和下一轮的 1），和调整型的腿（2 4 B）分开算速度
 scImp(int j) =>
     j == 0 or j == 2 or j == 4 or j == 5 or j == 7 or j == 8
 
-// 「现在正在走第 k 段」这个解读成立吗？
-// 要求：最近 k+1 个枢轴能当作 P0..Pk，方向交替、时间递增，走完的部分全部合规，
-// 而且正在走的那一段已经走出来的部分也不违规。
 scValid(Lv L, int k) =>
     int n = array.size(L.pv)
     Piv q0 = array.get(L.pv, n - 1 - k)
@@ -451,29 +378,28 @@ scValid(Lv L, int k) =>
         if maxSpan > 0 and bar_index - q0.bi > maxSpan
             ok := false
         if k >= 2
-            if not (array.get(x, 2) > array.get(x, 0))                     // 浪2 不破起点
+            if not (array.get(x, 2) > array.get(x, 0))
                 ok := false
         if k >= 3
-            if not (array.get(x, 3) > array.get(x, 1))                     // 浪3 越过浪1
+            if not (array.get(x, 3) > array.get(x, 1))
                 ok := false
         if k >= 4
-            if not (array.get(x, 4) > array.get(x, 1) - ovTol * l1)       // 浪4 不进浪1
+            if not (array.get(x, 4) > array.get(x, 1) - ovTol * l1)
                 ok := false
         if k >= 5
             float l3 = array.get(x, 3) - array.get(x, 2)
             float l5 = array.get(x, 5) - array.get(x, 4)
-            if l3 < l1 and l3 < l5                                         // 浪3 不最短
+            if l3 < l1 and l3 < l5
                 ok := false
             if need5
-                if not (array.get(x, 5) > array.get(x, 3))                 // 浪5 越过浪3
+                if not (array.get(x, 5) > array.get(x, 3))
                     ok := false
         if k >= 6
-            if not (array.get(x, 6) > array.get(x, 0))                     // A 不破推动浪起点
+            if not (array.get(x, 6) > array.get(x, 0))
                 ok := false
         if k >= 7
-            if not (array.get(x, 5) > array.get(x, 7))                     // B 不越过浪5
+            if not (array.get(x, 5) > array.get(x, 7))
                 ok := false
-        // 正在走的那一段，已经走出来的部分也不能违规
         if k == 1
             if not (xe > array.get(x, 0))
                 ok := false
@@ -488,14 +414,12 @@ scValid(Lv L, int k) =>
                 ok := false
     ok
 
-// 第 j 段终点的斐波那契目标（归一化价格）和它的依据。ext = true 时取下一档延长目标。
-// 依据里写的是**实际起作用**的那条规则 —— 夹紧没触发就不提。
 scTgt(array<float> E, float x0, int j, bool ext, float eps) =>
     float e0 = array.get(E, 0)
     float L1 = na(e0) ? na : e0 - x0
     float t = na
     string why = ""
-    string brf = ""                     // 短依据：手机「直接显示」明细表里放得下的版本
+    string brf = ""
     if j == 1
         float r = ext ? 0.786 : ret2
         t := math.max(e0 - r * L1, x0 + eps)
@@ -536,8 +460,6 @@ scTgt(array<float> E, float x0, int j, bool ext, float eps) =>
             why := why + "；被抬到刚好越过浪3 终点"
             brf := brf + "·过浪3"
     else if j == 5
-        // ABC 合计回撤 = projRetr × 推动浪；B 回撤 A 的 retB，C = A
-        // → 净回撤 = A − retB·A + A = (2 − retB)·A
         float a = projRetr * (array.get(E, 4) - x0) / (2.0 - retB)
         t := math.max(array.get(E, 4) - a * (ext ? 1.618 : 1.0), x0 + eps)
         why := "ABC 合计回撤推动浪的 " + str.tostring(projRetr) + "；按锯齿形分配 A = 合计 ÷ (2 − "
@@ -597,8 +519,6 @@ method scenario(Lv L) =>
         L.note := "枢轴不足（" + str.tostring(n) + " 个）"
         L.tip  := "图上确认的枢轴还不到 2 个，没法判断位置。刚加载、或者阈值太大时会这样。"
     else
-        // ── 1. 位置：从最深的解读往浅试，取第一个成立的 —— 能解释最多枢轴的那个。
-        //       k = 0（新的浪1 正在走）永远成立，所以一定有结果。
         int kk = 0
         for k = math.min(7, n - 1) to 0
             if scValid(L, k)
@@ -611,17 +531,16 @@ method scenario(Lv L) =>
         float x0 = s * q0.price
         float eps = syminfo.mintick
 
-        // ── 2. 高度：走完的段用实际枢轴，正在走和还没走的段用斐波那契目标
         array<float> E = array.new<float>(10, na)
         if kk > 0
             for j = 0 to kk - 1
                 Piv pj0 = array.get(L.pv, n - kk + j)
                 array.set(E, j, s * pj0.price)
-        bool running = bar_index - L.extBi <= 1     // 极值就在最近两根 → 这一段还在走
+        bool running = bar_index - L.extBi <= 1
         bool done = false
         bool extd = false
-        array<string> W  = array.new<string>(10, "")  // 每个点的高度依据，悬停浮窗用
-        array<string> Wb = array.new<string>(10, "")  // 同上的短版本，手机明细表用
+        array<string> W  = array.new<string>(10, "")
+        array<string> Wb = array.new<string>(10, "")
         for j = kk to 9
             float t = xe
             string why = "新的浪1：没有更早的参照，假设在当前极值处走完"
@@ -635,7 +554,6 @@ method scenario(Lv L) =>
                 bool up = j % 2 == 0
                 bool beyond = up ? xe >= t : xe <= t
                 if beyond and running and j > 0
-                    // 越过目标、还在走 → 按延长浪取下一档
                     float tOrig = t
                     [t1, w1, bf1] = scTgt(E, x0, j, true, eps)
                     t := t1
@@ -644,7 +562,6 @@ method scenario(Lv L) =>
                     brf := "延长·" + bf1
                     beyond := up ? xe >= t : xe <= t
                 if beyond and j > 0
-                    // 越过目标、已回头 → 暂按这一段在极值处走完
                     why := "实际已走到 " + str.tostring(L.ext, format.mintick)
                          + (extd ? "，连延长档 " : "，越过目标 ") + str.tostring(s * t, format.mintick)
                          + (extd ? " 都越过了" : " 之后已回头") + " → 暂按在这里走完。原目标：" + why
@@ -658,7 +575,6 @@ method scenario(Lv L) =>
             array.set(W, j, why)
             array.set(Wb, j, brf)
 
-        // ── 3. 角度：同类腿的实测速度。本组走完的腿各一票，本级别近 10 条腿的中位数一票
         array<float> vi = array.new<float>()
         array<float> vc = array.new<float>()
         if kk > 0
@@ -671,7 +587,7 @@ method scenario(Lv L) =>
                 else
                     array.push(vc, va0)
         Piv pk = array.get(L.pv, n - 1)
-        if L.extBi - pk.bi >= 3                      // 正在走的那段，走了 3 根以上才算数
+        if L.extBi - pk.bi >= 3
             float va1 = math.abs(L.ext - pk.price) / (L.extBi - pk.bi)
             if scImp(kk)
                 array.push(vi, va1)
@@ -688,7 +604,6 @@ method scenario(Lv L) =>
         float vImp = math.max(array.avg(vi), syminfo.mintick)
         float vCor = math.max(array.avg(vc), syminfo.mintick)
 
-        // ── 4. 路径：从「现在」出发。正在走的段若已按走完处理，就从它的极值处接下一段
         float xc = s * close
         array<int>   pt = array.new<int>()
         array<float> px = array.new<float>()
@@ -708,7 +623,6 @@ method scenario(Lv L) =>
             float xj = array.get(E, j)
             float vj = scImp(j) ? vImp : vCor
             int tj = tPrev + math.max(1, int(math.round(math.abs(xj - xPrev) / vj)))
-            // 按速度这一段本该已经走完、实际却没走完 → 从现价重算剩下的
             if tj <= bar_index
                 tj := bar_index + math.max(1, int(math.round(math.abs(xj - xc) / vj)))
             array.push(pt, tj)
@@ -717,7 +631,6 @@ method scenario(Lv L) =>
             tPrev := tj
             xPrev := xj
 
-        // TradingView 最多往未来画 500 根。超出就等比例压缩，保持各段角度的相对关系
         int np = array.size(pt)
         int far = array.get(pt, np - 1) - bar_index
         if far > 480
@@ -730,7 +643,6 @@ method scenario(Lv L) =>
                 array.set(pt, ci, tn)
                 prevT := tn
 
-        // ── 5. 画
         color c = L.col
         bool fullLbl = direct or projLbl != "浪名"
         if done
@@ -750,7 +662,6 @@ method scenario(Lv L) =>
                  xloc = xloc.bar_index, color = c, style = stPrj, width = pWidth))
             float chg = (y1 / close - 1.0) * 100.0
             string chgS = (chg >= 0 ? "+" : "") + str.tostring(chg, "#.#") + "%"
-            // 悬停浮窗：终点、离现价、大约何时、高度依据、角度依据
             int ahead = array.get(pt, di) - bar_index
             string when = "约 " + str.tostring(ahead) + " 根后 ≈ "
                  + str.format_time(time + ahead * tfSec * 1000, tfSec >= 86400 ? "yyyy-MM-dd" : "yyyy-MM-dd HH:mm",
@@ -774,17 +685,13 @@ method scenario(Lv L) =>
                  color = color.new(c, 25), textcolor = color.white, size = szLbl, tooltip = tipP))
         float yEnd = s * array.get(px, np - 1)
         if projRay
-            // 从推演终点往右画。旧版从当前K线画起：终点价离现价远的时候（比如 +52%），
-            // 这条线就落在当前视图里，TradingView 自动缩放把它算进去，纵轴被撑开、K线被压扁。
             int tEnd = array.get(pt, np - 1)
             L.sRay := line.new(tEnd, yEnd, tEnd + 1, yEnd, xloc = xloc.bar_index,
                  extend = extend.right, color = color.new(c, 50), style = line.style_dotted, width = 1)
 
-        // ── 6. 状态表文字
         L.sK  := kk
         L.sP0 := q0.bi
         string pos = scName(kk) + (done ? (extd ? "? 越过延长档" : "? 越过目标·已回头") : extd ? " 延长中" : " 进行中")
-        // 浪2 回撤过深的计数很脆弱（合法，但离作废只差一点），直说
         float l1v = array.get(E, 0) - x0
         if (kk >= 2 or (kk == 1 and done)) and l1v > 0
             float r2 = (array.get(E, 0) - array.get(E, 1)) / l1v
@@ -797,7 +704,6 @@ method scenario(Lv L) =>
         L.note2 := scName(array.get(pw, np - 1)) + " " + str.tostring(yEnd, format.mintick)
              + " (" + (chgEnd >= 0 ? "+" : "") + str.tostring(chgEnd, "#.#") + "%)"
 
-        // ── 8. 「直接显示」模式的明细行：浪 | 价位 | 离现价 | 约几根后·日期 | 依据
         if done
             float cD = (L.ext / close - 1.0) * 100.0
             array.push(L.dCells, scName(kk) + "?")
@@ -822,7 +728,6 @@ method scenario(Lv L) =>
         array.push(L.dCells, "调整腿")
         array.push(L.dCells, str.tostring(vCor, format.mintick) + "/根")
 
-        // ── 7. 悬停明细：表里的字很小，鼠标移到这一行上弹出的浮窗是正常字号
         string tp = "当前位置：" + pos + "\n\n推演路径（从现在起）："
         if done
             tp := tp + "\n  " + scName(kk) + "?   " + str.tostring(L.ext, format.mintick)
@@ -839,9 +744,6 @@ method scenario(Lv L) =>
              + " / 根，调整腿 " + str.tostring(vCor, format.mintick) + " / 根"
         L.tip := tp
 
-// ───────────────────────────────────────────────────────── 6. 每根维护
-
-// 输入可能被改；每根同步回对象，免得改了参数不生效
 LA.mult := useA
 LA.col  := cA
 LA.wid  := wA
@@ -870,8 +772,6 @@ LA.sweep()
 LB.sweep()
 LC.sweep()
 
-// 场景推演只在最后一根上画（它只在「现在」有意义）。
-// 两个级别选中了同一个起点、同一个位置时，推出来的路径完全一样 —— 只画更细的那个。
 if showProj and barstate.islast
     if LA.on
         LA.scenario()
@@ -907,7 +807,6 @@ float tgtC = LC.on ? LC.activeTgt() : na
 bool  wvBull = (hitA and LA.lastDir > 0) or (hitB and LB.lastDir > 0) or (hitC and LC.lastDir > 0)
 bool  wvBear = (hitA and LA.lastDir < 0) or (hitB and LB.lastDir < 0) or (hitC and LC.lastDir < 0)
 
-// 一行里每个格子挂同一段悬停明细 —— 鼠标移到这一行哪里都能看到
 method tblRow(Lv L, table tb, int r, float m) =>
     string tp = "级别「" + L.name + "」   ATR×" + str.tostring(m) + (tfAuto ? "（按周期自动）" : "（手动）")
          + "\n已确认枢轴 " + str.tostring(L.pvTotal) + " 个 · 完整 1-5 共 " + str.tostring(L.hits) + " 组"
@@ -963,7 +862,6 @@ if showTbl and barstate.islast
     table.cell(tb, 4, 4, "推演是推论，不是信号", text_color = color.orange, text_size = szT,
          text_halign = text.align_left, tooltip = fTip)
 
-    // 「直接显示（手机）」：把选中级别的推演路径逐点列在下面，不靠悬停
     table.clear(tb, 0, 5, 4, 13)
     if direct and showProj
         Lv D = LA
@@ -988,18 +886,10 @@ if showTbl and barstate.islast
                          text_color = ri == nd - 1 ? color.silver : D.col, text_size = szT,
                          text_halign = ci == 4 ? text.align_left : text.align_center)
 
-// ───────────────────────────────────────────────────────── 7. 警报
-
 alertcondition(hitA or hitB or hitC, "推动浪成立（任意级别）", "1-2-3-4-5 推动浪校验通过")
 alertcondition(hitA, "推动浪成立 · 细", "级别「细」出现 1-2-3-4-5")
 alertcondition(hitB, "推动浪成立 · 中", "级别「中」出现 1-2-3-4-5")
 alertcondition(hitC, "推动浪成立 · 粗", "级别「粗」出现 1-2-3-4-5")
-
-// ───────────────────────────────────────────────────────── 8. 样式页输出
-//
-// TradingView 的「样式」标签页只收 plot 家族的输出。场景推演是绘图对象，进不了
-// 样式页；下面这些能进：已确认推动浪的调整目标（到达目标或越过浪5 终点就断开），
-// 和推动浪成立的事件标记。
 
 plot(tgtA, "细 · 已确认推动浪的调整目标", color = #42a5f5, linewidth = 1,
      style = plot.style_linebr, display = display.pane)

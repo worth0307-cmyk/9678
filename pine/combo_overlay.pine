@@ -1,0 +1,748 @@
+//@version=6
+// MA Ribbon + EMA + SuperTrend + 长周期均线 + 斐波那契双窗口 + 背离，一个主图指标。
+// 斐波那契那一段(第 5 节)是 fib_pair.pine 合并进来的,名字全部带 fib 前缀以免撞车。
+// 粘贴后请确认编辑器里最后一行是 "// END",少了就是没复制全 —— 见 README.md。
+indicator("MA Ribbon + EMA + SuperTrend + Fib + Divergence", "Combo_overlay", overlay = true, format = format.price, precision = 2, max_bars_back = 1000, max_lines_count = 400, max_labels_count = 400)
+
+// ============================================================
+// Shared MA function (SMA / EMA / SMMA / WMA / VWMA)
+// ============================================================
+ma(source, length, MAtype) =>
+    switch MAtype
+        "SMA"        => ta.sma(source,  length)
+        "EMA"        => ta.ema(source,  length)
+        "SMMA (RMA)" => ta.rma(source,  length)
+        "WMA"        => ta.wma(source,  length)
+        "VWMA"       => ta.vwma(source, length)
+        => na
+
+// ============================================================
+// 1) Moving Average Ribbon  (SMA / close / 20-50-100)
+// ============================================================
+GRP_R = "Moving Average Ribbon"
+show_ma1   = input(true,         "MA #1", inline = "MA #1", display = display.none, group = GRP_R)
+ma1_type   = input.string("SMA", "",      inline = "MA #1", active = show_ma1, options = ["SMA", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP_R)
+ma1_source = input(close,        "",      inline = "MA #1", active = show_ma1, display = display.none, group = GRP_R)
+ma1_length = input.int(20,       "",      inline = "MA #1", active = show_ma1, minval = 1, group = GRP_R)
+ma1_color  = input(#f6c309,      "",      inline = "MA #1", active = show_ma1, display = display.none, group = GRP_R)
+
+show_ma2   = input(true,         "MA #2", inline = "MA #2", display = display.none, group = GRP_R)
+ma2_type   = input.string("SMA", "",      inline = "MA #2", active = show_ma2, options = ["SMA", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP_R)
+ma2_source = input(close,        "",      inline = "MA #2", active = show_ma2, display = display.none, group = GRP_R)
+ma2_length = input.int(50,       "",      inline = "MA #2", active = show_ma2, minval = 1, group = GRP_R)
+ma2_color  = input(#fb9800,      "",      inline = "MA #2", active = show_ma2, display = display.none, group = GRP_R)
+
+show_ma3   = input(true,         "MA #3", inline = "MA #3", display = display.none, group = GRP_R)
+ma3_type   = input.string("SMA", "",      inline = "MA #3", active = show_ma3, options = ["SMA", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP_R)
+ma3_source = input(close,        "",      inline = "MA #3", active = show_ma3, display = display.none, group = GRP_R)
+ma3_length = input.int(100,      "",      inline = "MA #3", active = show_ma3, minval = 1, group = GRP_R)
+ma3_color  = input(#fb6500,      "",      inline = "MA #3", active = show_ma3, display = display.none, group = GRP_R)
+
+ma1 = show_ma1 ? ma(ma1_source, ma1_length, ma1_type) : na
+ma2 = show_ma2 ? ma(ma2_source, ma2_length, ma2_type) : na
+ma3 = show_ma3 ? ma(ma3_source, ma3_length, ma3_type) : na
+
+plot(ma1, "MA #1", ma1_color, display = show_ma1 ? display.all : display.none)
+plot(ma2, "MA #2", ma2_color, display = show_ma2 ? display.all : display.none)
+plot(ma3, "MA #3", ma3_color, display = show_ma3 ? display.all : display.none)
+
+// ============================================================
+// 2) Moving Average Exponential  (EMA / close / 20-50-100)
+// ============================================================
+GRP_E = "Moving Average Exponential"
+show_ema1   = input(true,         "EMA #1", inline = "EMA #1", display = display.none, group = GRP_E)
+ema1_type   = input.string("EMA", "",       inline = "EMA #1", active = show_ema1, options = ["SMA", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP_E)
+ema1_source = input(close,        "",        inline = "EMA #1", active = show_ema1, display = display.none, group = GRP_E)
+ema1_length = input.int(20,       "",        inline = "EMA #1", active = show_ema1, minval = 1, group = GRP_E)
+ema1_color  = input(#2962FF,      "",        inline = "EMA #1", active = show_ema1, display = display.none, group = GRP_E)
+
+show_ema2   = input(true,         "EMA #2", inline = "EMA #2", display = display.none, group = GRP_E)
+ema2_type   = input.string("EMA", "",       inline = "EMA #2", active = show_ema2, options = ["SMA", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP_E)
+ema2_source = input(close,        "",        inline = "EMA #2", active = show_ema2, display = display.none, group = GRP_E)
+ema2_length = input.int(50,       "",        inline = "EMA #2", active = show_ema2, minval = 1, group = GRP_E)
+ema2_color  = input(#00BCD4,      "",        inline = "EMA #2", active = show_ema2, display = display.none, group = GRP_E)
+
+show_ema3   = input(true,         "EMA #3", inline = "EMA #3", display = display.none, group = GRP_E)
+ema3_type   = input.string("EMA", "",       inline = "EMA #3", active = show_ema3, options = ["SMA", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP_E)
+ema3_source = input(close,        "",        inline = "EMA #3", active = show_ema3, display = display.none, group = GRP_E)
+ema3_length = input.int(100,      "",        inline = "EMA #3", active = show_ema3, minval = 1, group = GRP_E)
+ema3_color  = input(#9C27B0,      "",        inline = "EMA #3", active = show_ema3, display = display.none, group = GRP_E)
+
+ema1 = show_ema1 ? ma(ema1_source, ema1_length, ema1_type) : na
+ema2 = show_ema2 ? ma(ema2_source, ema2_length, ema2_type) : na
+ema3 = show_ema3 ? ma(ema3_source, ema3_length, ema3_type) : na
+
+plot(ema1, "EMA #1", ema1_color, display = show_ema1 ? display.all : display.none)
+plot(ema2, "EMA #2", ema2_color, display = show_ema2 ? display.all : display.none)
+plot(ema3, "EMA #3", ema3_color, display = show_ema3 ? display.all : display.none)
+
+// ============================================================
+// 3) SuperTrend  (converted from v4, original defaults: ATR Period 10, Multiplier 3.0)
+// ============================================================
+GRP_ST       = "SuperTrend"
+Periods      = input.int(10, "ATR Period", group = GRP_ST)
+srcST        = input.source(hl2, "Source", group = GRP_ST)
+Multiplier   = input.float(3.0, "ATR Multiplier", step = 0.1, group = GRP_ST)
+changeATR    = input.bool(true, "Change ATR Calculation Method ?", group = GRP_ST)
+showsignals  = input.bool(true, "Show Buy/Sell Signals ?", group = GRP_ST)
+highlighting = input.bool(true, "Highlighter On/Off ?", group = GRP_ST)
+
+atr2 = ta.sma(ta.tr, Periods)
+atr  = changeATR ? ta.atr(Periods) : atr2
+
+up  = srcST - (Multiplier * atr)
+up1 = nz(up[1], up)
+up := close[1] > up1 ? math.max(up, up1) : up
+
+dn  = srcST + (Multiplier * atr)
+dn1 = nz(dn[1], dn)
+dn := close[1] < dn1 ? math.min(dn, dn1) : dn
+
+trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+
+upPlot = plot(trend == 1 ? up : na, title = "Up Trend", style = plot.style_linebr, linewidth = 2, color = color.green)
+buySignal = trend == 1 and trend[1] == -1
+plotshape(buySignal ? up : na, title = "UpTrend Begins", location = location.absolute, style = shape.circle, size = size.tiny, color = color.green)
+plotshape(buySignal and showsignals ? up : na, title = "Buy", text = "Buy", location = location.absolute, style = shape.labelup, size = size.tiny, color = color.green, textcolor = color.white)
+
+dnPlot = plot(trend == 1 ? na : dn, title = "Down Trend", style = plot.style_linebr, linewidth = 2, color = color.red)
+sellSignal = trend == -1 and trend[1] == 1
+plotshape(sellSignal ? dn : na, title = "DownTrend Begins", location = location.absolute, style = shape.circle, size = size.tiny, color = color.red)
+plotshape(sellSignal and showsignals ? dn : na, title = "Sell", text = "Sell", location = location.absolute, style = shape.labeldown, size = size.tiny, color = color.red, textcolor = color.white)
+
+mPlot = plot(ohlc4, title = "", style = plot.style_circles, linewidth = 1, color = na, editable = false)
+// 关掉高亮时用全透明,而不是原来的"白色 90%" —— 后者并没有真的关掉,只是把绿色换成
+// 一层淡白,在深色主题下仍然看得见。开着的时候颜色和原来完全一样。
+longFillColor  = highlighting and trend == 1 ? color.new(color.green, 90) : color.new(color.white, 100)
+shortFillColor = highlighting and trend == -1 ? color.new(color.red, 90) : color.new(color.white, 100)
+fill(mPlot, upPlot, title = "UpTrend Highligter", color = longFillColor)
+fill(mPlot, dnPlot, title = "DownTrend Highligter", color = shortFillColor)
+
+alertcondition(buySignal,  title = "SuperTrend Buy",  message = "SuperTrend Buy!")
+alertcondition(sellSignal, title = "SuperTrend Sell", message = "SuperTrend Sell!")
+changeCond = trend != trend[1]
+alertcondition(changeCond, title = "SuperTrend Direction Change", message = "SuperTrend has changed direction!")
+
+// ============================================================
+// 4) Long-term MA  (50-week & 200-day SMA, 来自更高周期数据)
+//    均线在更高周期里面算好再取回来。原来的写法是先把周线/日线收盘价取回来、再在
+//    图表周期上求 SMA —— 那是错的：lookahead_off 下 request.security 返回的是"本周
+//    到目前为止的收盘",在日线图上它每天就等于当天的收盘价,于是 ta.sma(week_close,
+//    50) 算出来和 50 日均线一模一样(实测差 0.0%),跟 50 周没有关系。日线图上的
+//    200 Day MA 碰巧是对的(day_close 就是 close),但在 4 小时图上它只覆盖约 33 天。
+//
+//    锯齿：周线上算好的 50 周均线直接画在日线上,历史 K 线在这一周走完之前一直是上周
+//    的值,周日那根才一下跳到本周的值 —— 一周 7 根里 6 根是平的,线是一级一级的台阶。
+//    (4 小时图上的 200 日均线同理,一天 6 根。) 现在按时间把这一周的变化摊开：
+//
+//      50 周均线 = 上周的 50 周均线 + 本周走过的时间比例 × (现价 − 本周要挤出去的那个周收盘) / 50
+//
+//    这一周走完时比例 = 1、现价 = 本周收盘,正好等于官方的 50 周均线(BTC 日线实测差
+//    1e-11);周内只用已走完的周线数据和当前收盘,不偷看未来,历史和实时画法一样。
+//    BTC 日线 2020 年以来实测：单根最大变动 1,243 → 230,周交界那根不再跳。
+//    图表周期等于均线周期时(周线图上的 50 周、日线图上的 200 日)比例恒为 1,结果和
+//    直接求 SMA 完全一样。
+// ============================================================
+GRP_LT       = "Long-term MA"
+show_ma50w   = input.bool(true, "50 Week MA", inline = "ltma1", group = GRP_LT)
+ma50w_color  = input.color(color.orange, "", inline = "ltma1", group = GRP_LT)
+show_ma200d  = input.bool(true, "200 Day MA", inline = "ltma2", group = GRP_LT)
+ma200d_color = input.color(color.red, "", inline = "ltma2", group = GRP_LT)
+
+// tf 周期上 len 根的 SMA,把 tf 当前这一根的变化按走过的时间比例摊到图表的每根 K 线上。
+// [1] 配 lookahead_on 是官方的不重绘写法：取的是上一根已走完的 tf 数据。
+htfSma(tf, len) =>
+    [pPrev, pOut] = request.security(syminfo.tickerid, tf, [ta.sma(close, len)[1], close[len]], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+    t0 = time(tf)
+    t1 = time_close(tf)
+    frac = na(t0) or na(t1) or t1 <= t0 ? 1.0 : math.max(0.0, math.min(1.0, float(time_close - t0) / float(t1 - t0)))
+    pPrev + frac * (close - pOut) / len
+
+// 图表周期比均线周期还大时(月线图上的 50 周、周线图上的 200 日)上面的摊法不适用,
+// 直接取值 —— 那种图上一根 K 线就盖住好几根均线周期,本来就不会有台阶。
+chartSecs = timeframe.in_seconds(timeframe.period)
+ma50wS    = htfSma("W", 50)
+ma200dS   = htfSma("D", 200)
+ma50wR    = request.security(syminfo.tickerid, "W", ta.sma(close, 50), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+ma200dR   = request.security(syminfo.tickerid, "D", ta.sma(close, 200), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+ma50w     = chartSecs > 604800 ? ma50wR : ma50wS
+ma200d    = chartSecs > 86400 ? ma200dR : ma200dS
+
+plot(show_ma50w  ? ma50w  : na, "50 Week MA",  ma50w_color,  2)
+plot(show_ma200d ? ma200d : na, "200 Day MA",  ma200d_color, 2)
+
+// ============================================================
+// 5) Fib Pair (margin)  —— 两组斐波那契回撤,画在 K 线右侧的空白处
+//    0 在窗口低点、1 在窗口高点,现价百分比不夹紧(高于高点就大于 100%)。
+//    区间内的档位钉在自己的价位上,一格不挪;区间外的停在本列的上方或下方。
+// ============================================================
+GRP_FIB = "Fib Pair (margin)"
+GRP_FIBC = "Fib Pair 颜色"
+fibOn       = input.bool(true, "显示两组斐波那契", group = GRP_FIB)
+fibOnA      = input.bool(true, "Window A", inline = "fibA", group = GRP_FIB)
+fibWinA     = input.string("1 年", "", inline = "fibA", active = fibOnA, options = ["3 个月", "半年", "1 年", "2 年", "3 年"], group = GRP_FIB)
+fibOnB      = input.bool(true, "Window B", inline = "fibB", group = GRP_FIB)
+fibWinB     = input.string("半年", "", inline = "fibB", active = fibOnB, options = ["3 个月", "半年", "1 年", "2 年", "3 年"], group = GRP_FIB)
+fibSizeIn   = input.string("中 / normal", "字号", options = ["小 / small", "中 / normal", "大 / large", "特大 / huge"], group = GRP_FIB)
+fibGap      = input.int(3, "第一列距最后一根 K 线（根数）", minval = 0, maxval = 60, group = GRP_FIB)
+fibColGap   = input.int(12, "两列间隔（根数）", minval = 4, maxval = 80, group = GRP_FIB)
+fibShowRail = input.bool(true, "图上画出各档位的横线", group = GRP_FIB)
+fibShowRng  = input.bool(true, "图上标出窗口的高点和低点", group = GRP_FIB)
+fibClip     = input.bool(true, "区间外的档位停在视图边上（防止 K 线被压扁）", group = GRP_FIB)
+fibShowNow  = input.bool(true, "标出现价所在的位置", group = GRP_FIB)
+fibColA     = input.color(#2962ff, "Window A", group = GRP_FIBC)
+fibColB     = input.color(#ff9800, "Window B", group = GRP_FIBC)
+fibColTxt   = input.color(#d1d4dc, "档位文字", group = GRP_FIBC)
+fibLblSize  = fibSizeIn == "小 / small" ? size.small : fibSizeIn == "中 / normal" ? size.normal : fibSizeIn == "大 / large" ? size.large : size.huge
+// 一行文字大约占窗格高度的百分之几 —— 停在边上那几条的行距照这个给。
+fibStepPct  = fibSizeIn == "小 / small" ? 0.025 : fibSizeIn == "中 / normal" ? 0.035 : fibSizeIn == "大 / large" ? 0.045 : 0.06
+
+// 窗口长度按图表自身周期换算成根数,所以日线的"1 年"和周线的"1 年"都是一年。
+fibSecs  = timeframe.in_seconds(timeframe.period)
+fibDaysA = fibWinA == "3 个月" ? 92 : fibWinA == "半年" ? 183 : fibWinA == "1 年" ? 365 : fibWinA == "2 年" ? 730 : 1095
+fibDaysB = fibWinB == "3 个月" ? 92 : fibWinB == "半年" ? 183 : fibWinB == "1 年" ? 365 : fibWinB == "2 年" ? 730 : 1095
+fibLenA  = int(math.min(4990, math.max(2, math.round(fibDaysA * 86400.0 / fibSecs))))
+fibLenB  = int(math.min(4990, math.max(2, math.round(fibDaysB * 86400.0 / fibSecs))))
+fibKeep  = int(math.max(fibLenA, fibLenB))
+
+// 窗口的高低点用环形缓冲自己算,不走 ta.highest：combo_overlay.pine 把 max_bars_back
+// 钉在 1000,而日线的"3 年"要回看 1095 根,ta.highest 会撞上那个上限。每根只写一格,
+// 只有最后一根才扫一遍,每根的开销是 O(1)。图表比窗口短时取全部已有的根数。
+var fibHiBuf = array.new_float(fibKeep)
+var fibLoBuf = array.new_float(fibKeep)
+if fibOn
+    array.set(fibHiBuf, bar_index % fibKeep, high)
+    array.set(fibLoBuf, bar_index % fibKeep, low)
+
+fibPeak(buf, len, wantHigh) =>
+    take = int(math.min(len, bar_index + 1))
+    n = array.size(buf)
+    float out = na
+    for fi = 0 to take - 1
+        v = array.get(buf, (bar_index - fi) % n)
+        if not na(v)
+            out := na(out) ? v : (wantHigh ? math.max(out, v) : math.min(out, v))
+    out
+
+// 可见价格区间：用可见 K 线自己的最高最低价量出来。自动缩放本来就是照这个算的,所以
+// 只要画出来的东西都落在这个区间里,价格轴就撑不开,K 线也就不会被压扁。裁剪按 K 线的
+// 时间判断,纵向怎么缩放都不影响它,不会来回抖。chart.* 会在视图变化时让脚本重算。
+var float fibVisHi = na
+var float fibVisLo = na
+if fibOn and fibClip and time >= chart.left_visible_bar_time and time <= chart.right_visible_bar_time
+    fibVisHi := na(fibVisHi) ? high : math.max(fibVisHi, high)
+    fibVisLo := na(fibVisLo) ? low : math.min(fibVisLo, low)
+
+fibFits(px) =>
+    na(fibVisHi) or na(fibVisLo) or (px >= fibVisLo and px <= fibVisHi)
+
+// 千分位 + 两位小数,手写而非格式串：1.26205E5 出现在唯一要读的地方比八行算术糟。
+fibGrouped(price) =>
+    fNeg = price < 0
+    fV = math.abs(price)
+    fWhole = math.floor(fV)
+    fFrac = math.round((fV - fWhole) * 100)
+    if fFrac >= 100
+        fWhole := fWhole + 1
+        fFrac := 0
+    fDigits = fWhole >= 1 ? str.tostring(fWhole, "#") : "0"
+    fN = str.length(fDigits)
+    fOut = ""
+    for fi = 0 to fN - 1
+        fOut := fOut + str.substring(fDigits, fi, fi + 1)
+        fLeft = fN - 1 - fi
+        if fLeft > 0 and fLeft % 3 == 0
+            fOut := fOut + ","
+    (fNeg ? "-" : "") + fOut + "." + (fFrac < 10 ? "0" : "") + str.tostring(fFrac, "#")
+
+// 排版：区间内的档位一格都不挪,画在它自己的价位上 —— 标签和那条横线必须对得上,这是
+// 这个指标唯一的用处。区间外的本来就没有真实位置可言,叠在本列的上方(↑)或下方(↓);
+// 往里叠的时候遇到本列区间内的标签就跳过它再往下接着叠,所以两边都不用让步。
+fibAdd(ys, ks, rs, ts, ls, cs, y, k, r, t, l, c) =>
+    pos = array.size(ys)
+    if pos > 0
+        for fi = 0 to pos - 1
+            if y > array.get(ys, fi)
+                pos := fi
+                break
+    array.insert(ys, pos, y)
+    array.insert(ks, pos, k)
+    array.insert(rs, pos, r)
+    array.insert(ts, pos, t)
+    array.insert(ls, pos, l)
+    array.insert(cs, pos, c)
+
+fibSlot(blkY, blkL, lane, start, step, up) =>
+    out = start
+    for fp = 0 to 11
+        hit = false
+        if array.size(blkY) > 0
+            for fi = 0 to array.size(blkY) - 1
+                if array.get(blkL, fi) == lane and math.abs(array.get(blkY, fi) - out) < step
+                    out := up ? array.get(blkY, fi) + step : array.get(blkY, fi) - step
+                    hit := true
+        if not hit
+            break
+    out
+
+var fibRatios = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+var fibMarks = array.new_label(0)
+var fibRails = array.new_line(0)
+
+if fibOn and barstate.islast
+    if array.size(fibMarks) > 0
+        for fi = 0 to array.size(fibMarks) - 1
+            label.delete(array.get(fibMarks, fi))
+        array.clear(fibMarks)
+    if array.size(fibRails) > 0
+        for fi = 0 to array.size(fibRails) - 1
+            line.delete(array.get(fibRails, fi))
+        array.clear(fibRails)
+
+    fYs = array.new_float(0)
+    fKs = array.new_int(0)
+    fRs = array.new_int(0)
+    fTs = array.new_string(0)
+    fLs = array.new_int(0)
+    fCs = array.new_color(0)
+    for fk = 0 to 1
+        if fk == 0 ? fibOnA : fibOnB
+            fLen = fk == 0 ? fibLenA : fibLenB
+            fCol = fk == 0 ? fibColA : fibColB
+            fName = fk == 0 ? fibWinA : fibWinB
+            fHi = fibPeak(fibHiBuf, fLen, true)
+            fLo = fibPeak(fibLoBuf, fLen, false)
+            fX = bar_index + fibGap + fk * fibColGap
+            fBack = math.max(0, bar_index - fLen + 1)
+            if fHi > fLo
+                fPct = str.tostring((close - fLo) / (fHi - fLo) * 100, "#.#") + "%"
+                fibAdd(fYs, fKs, fRs, fTs, fLs, fCs, fHi, fibFits(fHi) ? 0 : (fHi > fibVisHi ? 1 : 2), 1, fName + "  现价 " + fPct, fk, fCol)
+                for fi = 0 to array.size(fibRatios) - 1
+                    fR = array.get(fibRatios, fi)
+                    fPx = fLo + (fHi - fLo) * fR
+                    fK2 = fibFits(fPx) ? 0 : (fPx > fibVisHi ? 1 : 2)
+                    fMk = fK2 == 0 ? "" : (fK2 == 1 ? "↑ " : "↓ ")
+                    fibAdd(fYs, fKs, fRs, fTs, fLs, fCs, fPx, fK2, 0, fMk + str.tostring(fR, "0.000") + "   " + fibGrouped(fPx), fk, fCol)
+                    if fibShowRail and fK2 == 0
+                        array.push(fibRails, line.new(x1 = fBack, y1 = fPx, x2 = fX - 1, y2 = fPx, xloc = xloc.bar_index, extend = extend.none, color = color.new(fCol, 78), style = line.style_dotted, width = 1))
+                if fibShowRng and fibFits(fHi)
+                    array.push(fibRails, line.new(x1 = fBack, y1 = fHi, x2 = fX - 1, y2 = fHi, xloc = xloc.bar_index, extend = extend.none, color = color.new(fCol, 30), style = line.style_dashed, width = 1))
+                if fibShowRng and fibFits(fLo)
+                    array.push(fibRails, line.new(x1 = fBack, y1 = fLo, x2 = fX - 1, y2 = fLo, xloc = xloc.bar_index, extend = extend.none, color = color.new(fCol, 30), style = line.style_dashed, width = 1))
+    if fibShowNow and (fibOnA or fibOnB)
+        fibAdd(fYs, fKs, fRs, fTs, fLs, fCs, close, 0, 2, "现价 " + fibGrouped(close), fibOnA ? 0 : 1, fibColTxt)
+
+    fN = array.size(fYs)
+    if fN > 0
+        // 贴着可见区间的上下沿,不再留边距 —— 往下的那一堆就尽量低,往上的尽量高。
+        // 再往外就到视图之外了,价格轴会跟着被拉开,K 线又要被压扁。
+        fTop = na(fibVisHi) ? array.get(fYs, 0) : fibVisHi
+        fBot = na(fibVisLo) ? array.get(fYs, fN - 1) : fibVisLo
+        fStep = math.min((fTop - fBot) * fibStepPct, (fTop - fBot) / (fN + 1))
+        // 区间内的标签已经在自己的价位上了,它们是停靠时要绕开的障碍。
+        fBlkY = array.new_float(0)
+        fBlkL = array.new_int(0)
+        for fi = 0 to fN - 1
+            if array.get(fKs, fi) == 0
+                // 区间内的窗口标题是往上挂的(style_label_lower_left),文字占的是锚点
+                // 上面那一行,所以挡住的位置要按上半行算,否则停靠的会压到它身上。
+                array.push(fBlkY, array.get(fYs, fi) + (array.get(fRs, fi) == 1 ? fStep * 0.5 : 0))
+                array.push(fBlkL, array.get(fLs, fi))
+        // 向上停靠的一堆整体排在本列区间内标签的上方,中间留一行空隙,堆内从下往上是
+        // 标题、然后档位按价格递增 —— 所以标题在最下面,紧挨着本列的行情区。
+        // 现价常常就贴在视图顶上(你这张图里在窗格 88% 处),六行根本塞不进它上面那点
+        // 空当,所以这一堆允许顶出可见区间,上限是区间高度的 25%：价格轴会被拉高这么
+        // 多(这张图约 9%),远不到当初把 K 线压成一条的地步。实在还不够就把行距压到
+        // 半行为止。
+        for fLn = 0 to 1
+            float fGuard = na
+            fCnt = 0
+            for fi = 0 to fN - 1
+                if array.get(fLs, fi) == fLn
+                    if array.get(fKs, fi) == 0
+                        // 标题往上挂,占的是锚点上面那一行,按整行算
+                        fG = array.get(fYs, fi) + (array.get(fRs, fi) == 1 ? fStep : fStep * 0.5)
+                        fGuard := na(fGuard) ? fG : math.max(fGuard, fG)
+                    if array.get(fKs, fi) == 1
+                        fCnt := fCnt + 1
+            if fCnt > 0
+                fHug = fTop - (fCnt - 1) * fStep
+                fLowest = na(fGuard) ? fHug : math.max(fGuard + fStep * 0.5, fHug)
+                fSlot = fCnt - 1
+                fCur = fTop
+                // 行距永远是整整一行,不压缩 —— 压缩就等于让标签互相盖住,那比排得
+                // 不够高更糟。顶出去超过上限就退回老办法:从视图顶往下排,遇到本列
+                // 区间内的标签绕过去。
+                fRoom = fLowest + (fCnt - 1) * fStep <= fTop + (fTop - fBot) * 0.25
+                for fPass = 0 to 1
+                    for fi = 0 to fN - 1
+                        if array.get(fKs, fi) == 1 and array.get(fLs, fi) == fLn and (fPass == 0) == (array.get(fRs, fi) != 1)
+                            if fRoom
+                                array.set(fYs, fi, fLowest + fSlot * fStep)
+                                fSlot := fSlot - 1
+                            else
+                                fY = math.max(fBot, fibSlot(fBlkY, fBlkL, fLn, fCur, fStep, false))
+                                array.set(fYs, fi, fY)
+                                fCur := fY - fStep
+        fDn0 = fBot
+        fDn1 = fBot
+        for fi = fN - 1 to 0
+            if array.get(fKs, fi) == 2
+                fLn = array.get(fLs, fi)
+                fY = math.min(fTop, fibSlot(fBlkY, fBlkL, fLn, fLn == 0 ? fDn0 : fDn1, fStep, true))
+                array.set(fYs, fi, fY)
+                if fLn == 0
+                    fDn0 := fY + fStep
+                else
+                    fDn1 := fY + fStep
+        for fi = 0 to fN - 1
+            fRole = array.get(fRs, fi)
+            fC = array.get(fCs, fi)
+            fXd = bar_index + fibGap + array.get(fLs, fi) * fibColGap
+            fTc = fRole == 0 ? fibColTxt : fC
+            fBc = fRole == 0 ? color.new(fC, 82) : (fRole == 1 ? color.new(fC, 100) : color.new(fC, 88))
+            // 只有钉在真实价位上的标题才往上挂 —— 那一行的锚点被 1.000 占着,往上挂
+            // 正好错开。停靠的标题有自己的一格,必须和别的标签一样居中,否则会往上
+            // 压到 ↑ 那一堆的最后一条上。
+            fSt = fRole == 1 and array.get(fKs, fi) == 0 ? label.style_label_lower_left : label.style_label_left
+            array.push(fibMarks, label.new(x = fXd, y = array.get(fYs, fi), text = array.get(fTs, fi), xloc = xloc.bar_index, yloc = yloc.price, color = fBc, style = fSt, textcolor = fTc, size = fibLblSize, textalign = text.align_left))
+// ============================================================
+// 6) Divergence for Many Indicators   (v4 -> v6 转换)
+//    © LonesomeTheBlue — Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/)
+// ============================================================
+GRP_DIV = "Divergence for Many Indicators"
+prd          = input.int(5, "Pivot Period", minval = 1, maxval = 50, group = GRP_DIV)
+source       = input.string("Close", "Source for Pivot Points", options = ["Close", "High/Low"], group = GRP_DIV)
+searchdiv    = input.string("Regular", "Divergence Type", options = ["Regular", "Hidden", "Regular/Hidden"], group = GRP_DIV)
+showindis    = input.string("Full", "Show Indicator Names", options = ["Full", "First Letter", "Don't Show"], group = GRP_DIV)
+showlimit    = input.int(1, "Minimum Number of Divergence", minval = 1, maxval = 11, group = GRP_DIV)
+maxpp        = input.int(10, "Maximum Pivot Points to Check", minval = 1, maxval = 20, group = GRP_DIV)
+maxbars      = input.int(100, "Maximum Bars to Check", minval = 30, maxval = 200, group = GRP_DIV)
+shownum      = input.bool(true, "Show Divergence Number", group = GRP_DIV)
+showlast     = input.bool(false, "Show Only Last Divergence", group = GRP_DIV)
+dontconfirm  = input.bool(false, "Don't Wait for Confirmation", group = GRP_DIV)
+showlines    = input.bool(true, "Show Divergence Lines", group = GRP_DIV)
+showpivot    = input.bool(false, "Show Pivot Points", group = GRP_DIV)
+calcmacd     = input.bool(true, "MACD", group = GRP_DIV)
+calcmacda    = input.bool(true, "MACD Histogram", group = GRP_DIV)
+calcrsi      = input.bool(true, "RSI", group = GRP_DIV)
+calcstoc     = input.bool(true, "Stochastic", group = GRP_DIV)
+calccci      = input.bool(true, "CCI", group = GRP_DIV)
+calcmom      = input.bool(true, "Momentum", group = GRP_DIV)
+calcobv      = input.bool(true, "OBV", group = GRP_DIV)
+calcvwmacd   = input.bool(true, "VWmacd", group = GRP_DIV)
+calccmf      = input.bool(true, "Chaikin Money Flow", group = GRP_DIV)
+calcmfi      = input.bool(true, "Money Flow Index", group = GRP_DIV)
+calcext      = input.bool(false, "Check External Indicator", group = GRP_DIV)
+externalindi = input.source(close, "External Indicator", group = GRP_DIV)
+pos_reg_div_col  = input.color(color.yellow, "Positive Regular Divergence", group = GRP_DIV)
+neg_reg_div_col  = input.color(color.navy, "Negative Regular Divergence", group = GRP_DIV)
+pos_hid_div_col  = input.color(color.lime, "Positive Hidden Divergence", group = GRP_DIV)
+neg_hid_div_col  = input.color(color.red, "Negative Hidden Divergence", group = GRP_DIV)
+pos_div_text_col = input.color(color.black, "Positive Divergence Text Color", group = GRP_DIV)
+neg_div_text_col = input.color(color.white, "Negative Divergence Text Color", group = GRP_DIV)
+reg_div_l_style_ = input.string("Solid", "Regular Divergence Line Style", options = ["Solid", "Dashed", "Dotted"], group = GRP_DIV)
+hid_div_l_style_ = input.string("Dashed", "Hidden Divergence Line Style", options = ["Solid", "Dashed", "Dotted"], group = GRP_DIV)
+reg_div_l_width  = input.int(2, "Regular Divergence Line Width", minval = 1, maxval = 5, group = GRP_DIV)
+hid_div_l_width  = input.int(1, "Hidden Divergence Line Width", minval = 1, maxval = 5, group = GRP_DIV)
+showmas = input.bool(false, "Show MAs 50 & 200", inline = "ma12", group = GRP_DIV)
+cma1col = input.color(color.lime, "", inline = "ma12", group = GRP_DIV)
+cma2col = input.color(color.red, "", inline = "ma12", group = GRP_DIV)
+
+plot(showmas ? ta.sma(close, 50)  : na, "Div SMA 50",  color = showmas ? cma1col : na)
+plot(showmas ? ta.sma(close, 200) : na, "Div SMA 200", color = showmas ? cma2col : na)
+
+var reg_div_l_style = reg_div_l_style_ == "Solid" ? line.style_solid : reg_div_l_style_ == "Dashed" ? line.style_dashed : line.style_dotted
+var hid_div_l_style = hid_div_l_style_ == "Solid" ? line.style_solid : hid_div_l_style_ == "Dashed" ? line.style_dashed : line.style_dotted
+
+rsi = ta.rsi(close, 14)
+[macd, signal, deltamacd] = ta.macd(close, 12, 26, 9)
+moment = ta.mom(close, 10)
+cci = ta.cci(close, 10)
+Obv = ta.obv
+stk = ta.sma(ta.stoch(close, high, low, 14), 3)
+maFast = ta.vwma(close, 12)
+maSlow = ta.vwma(close, 26)
+vwmacd = maFast - maSlow
+Cmfm = ((close - low) - (high - close)) / (high - low)
+Cmfv = Cmfm * volume
+cmf = ta.sma(Cmfv, 21) / ta.sma(volume, 21)
+Mfi = ta.mfi(close, 14)
+
+var indicators_name = array.new_string(11)
+var div_colors = array.new_color(4)
+if barstate.isfirst
+    array.set(indicators_name, 0,  showindis == "Full" ? "MACD"   : "M")
+    array.set(indicators_name, 1,  showindis == "Full" ? "Hist"   : "H")
+    array.set(indicators_name, 2,  showindis == "Full" ? "RSI"    : "E")
+    array.set(indicators_name, 3,  showindis == "Full" ? "Stoch"  : "S")
+    array.set(indicators_name, 4,  showindis == "Full" ? "CCI"    : "C")
+    array.set(indicators_name, 5,  showindis == "Full" ? "MOM"    : "M")
+    array.set(indicators_name, 6,  showindis == "Full" ? "OBV"    : "O")
+    array.set(indicators_name, 7,  showindis == "Full" ? "VWMACD" : "V")
+    array.set(indicators_name, 8,  showindis == "Full" ? "CMF"    : "C")
+    array.set(indicators_name, 9,  showindis == "Full" ? "MFI"    : "M")
+    array.set(indicators_name, 10, showindis == "Full" ? "Extrn"  : "X")
+    array.set(div_colors, 0, pos_reg_div_col)
+    array.set(div_colors, 1, neg_reg_div_col)
+    array.set(div_colors, 2, pos_hid_div_col)
+    array.set(div_colors, 3, neg_hid_div_col)
+
+float ph = ta.pivothigh((source == "Close" ? close : high), prd, prd)
+float pl = ta.pivotlow((source == "Close" ? close : low), prd, prd)
+plotshape(not na(ph) and showpivot, text = "H", style = shape.labeldown, color = color.new(color.white, 100), textcolor = color.red,  location = location.abovebar, offset = -prd)
+plotshape(not na(pl) and showpivot, text = "L", style = shape.labelup,   color = color.new(color.white, 100), textcolor = color.lime, location = location.belowbar, offset = -prd)
+
+var int maxarraysize = 20
+var ph_positions = array.new_int(maxarraysize, 0)
+var pl_positions = array.new_int(maxarraysize, 0)
+var ph_vals = array.new_float(maxarraysize, 0.)
+var pl_vals = array.new_float(maxarraysize, 0.)
+
+if not na(ph)
+    array.unshift(ph_positions, bar_index)
+    array.unshift(ph_vals, ph)
+    if array.size(ph_positions) > maxarraysize
+        array.pop(ph_positions)
+        array.pop(ph_vals)
+
+if not na(pl)
+    array.unshift(pl_positions, bar_index)
+    array.unshift(pl_vals, pl)
+    if array.size(pl_positions) > maxarraysize
+        array.pop(pl_positions)
+        array.pop(pl_vals)
+
+// cond == 1 => positive_regular, cond == 2 => negative_hidden
+positive_regular_positive_hidden_divergence(src, cond) =>
+    divlen = 0
+    prsc = source == "Close" ? close : low
+    if dontconfirm or src > src[1] or close > close[1]
+        startpoint = dontconfirm ? 0 : 1
+        for x = 0 to maxpp - 1
+            len = bar_index - array.get(pl_positions, x) + prd
+            if array.get(pl_positions, x) == 0 or len > maxbars
+                break
+            if len > 5 and ((cond == 1 and src[startpoint] > src[len] and prsc[startpoint] < nz(array.get(pl_vals, x))) or (cond == 2 and src[startpoint] < src[len] and prsc[startpoint] > nz(array.get(pl_vals, x))))
+                slope1 = (src[startpoint] - src[len]) / (len - startpoint)
+                virtual_line1 = src[startpoint] - slope1
+                slope2 = (close[startpoint] - close[len]) / (len - startpoint)
+                virtual_line2 = close[startpoint] - slope2
+                arrived = true
+                for y = 1 + startpoint to len - 1
+                    if src[y] < virtual_line1 or nz(close[y]) < virtual_line2
+                        arrived := false
+                        break
+                    virtual_line1 := virtual_line1 - slope1
+                    virtual_line2 := virtual_line2 - slope2
+                if arrived
+                    divlen := len
+                    break
+    divlen
+
+// cond == 1 => negative_regular, cond == 2 => positive_hidden
+negative_regular_negative_hidden_divergence(src, cond) =>
+    divlen = 0
+    prsc = source == "Close" ? close : high
+    if dontconfirm or src < src[1] or close < close[1]
+        startpoint = dontconfirm ? 0 : 1
+        for x = 0 to maxpp - 1
+            len = bar_index - array.get(ph_positions, x) + prd
+            if array.get(ph_positions, x) == 0 or len > maxbars
+                break
+            if len > 5 and ((cond == 1 and src[startpoint] < src[len] and prsc[startpoint] > nz(array.get(ph_vals, x))) or (cond == 2 and src[startpoint] > src[len] and prsc[startpoint] < nz(array.get(ph_vals, x))))
+                slope1 = (src[startpoint] - src[len]) / (len - startpoint)
+                virtual_line1 = src[startpoint] - slope1
+                slope2 = (close[startpoint] - nz(close[len])) / (len - startpoint)
+                virtual_line2 = close[startpoint] - slope2
+                arrived = true
+                for y = 1 + startpoint to len - 1
+                    if src[y] > virtual_line1 or nz(close[y]) > virtual_line2
+                        arrived := false
+                        break
+                    virtual_line1 := virtual_line1 - slope1
+                    virtual_line2 := virtual_line2 - slope2
+                if arrived
+                    divlen := len
+                    break
+    divlen
+
+calculate_divs(cond, indicator) =>
+    divs = array.new_int(4, 0)
+    array.set(divs, 0, cond and (searchdiv == "Regular" or searchdiv == "Regular/Hidden") ? positive_regular_positive_hidden_divergence(indicator, 1) : 0)
+    array.set(divs, 1, cond and (searchdiv == "Regular" or searchdiv == "Regular/Hidden") ? negative_regular_negative_hidden_divergence(indicator, 1) : 0)
+    array.set(divs, 2, cond and (searchdiv == "Hidden"  or searchdiv == "Regular/Hidden") ? positive_regular_positive_hidden_divergence(indicator, 2) : 0)
+    array.set(divs, 3, cond and (searchdiv == "Hidden"  or searchdiv == "Regular/Hidden") ? negative_regular_negative_hidden_divergence(indicator, 2) : 0)
+    divs
+
+var all_divergences = array.new_int(44) // 11 indicators * 4 divergence = 44
+array_set_divs(div_pointer, index) =>
+    for x = 0 to 3
+        array.set(all_divergences, index * 4 + x, array.get(div_pointer, x))
+
+array_set_divs(calculate_divs(calcmacd,   macd),         0)
+array_set_divs(calculate_divs(calcmacda,  deltamacd),    1)
+array_set_divs(calculate_divs(calcrsi,    rsi),          2)
+array_set_divs(calculate_divs(calcstoc,   stk),          3)
+array_set_divs(calculate_divs(calccci,    cci),          4)
+array_set_divs(calculate_divs(calcmom,    moment),       5)
+array_set_divs(calculate_divs(calcobv,    Obv),          6)
+array_set_divs(calculate_divs(calcvwmacd, vwmacd),       7)
+array_set_divs(calculate_divs(calccmf,    cmf),          8)
+array_set_divs(calculate_divs(calcmfi,    Mfi),          9)
+array_set_divs(calculate_divs(calcext,    externalindi), 10)
+
+total_div = 0.0
+for x = 0 to array.size(all_divergences) - 1
+    total_div := total_div + math.round(math.sign(array.get(all_divergences, x)))
+
+if total_div < showlimit
+    array.fill(all_divergences, 0)
+
+var pos_div_lines = array.new_line(0)
+var neg_div_lines = array.new_line(0)
+var pos_div_labels = array.new_label(0)
+var neg_div_labels = array.new_label(0)
+
+delete_old_pos_div_lines() =>
+    if array.size(pos_div_lines) > 0
+        for j = 0 to array.size(pos_div_lines) - 1
+            line.delete(array.get(pos_div_lines, j))
+        array.clear(pos_div_lines)
+
+delete_old_neg_div_lines() =>
+    if array.size(neg_div_lines) > 0
+        for j = 0 to array.size(neg_div_lines) - 1
+            line.delete(array.get(neg_div_lines, j))
+        array.clear(neg_div_lines)
+
+delete_old_pos_div_labels() =>
+    if array.size(pos_div_labels) > 0
+        for j = 0 to array.size(pos_div_labels) - 1
+            label.delete(array.get(pos_div_labels, j))
+        array.clear(pos_div_labels)
+
+delete_old_neg_div_labels() =>
+    if array.size(neg_div_labels) > 0
+        for j = 0 to array.size(neg_div_labels) - 1
+            label.delete(array.get(neg_div_labels, j))
+        array.clear(neg_div_labels)
+
+delete_last_pos_div_lines_label(n) =>
+    if n > 0 and array.size(pos_div_lines) >= n
+        asz = array.size(pos_div_lines)
+        for j = 1 to n
+            line.delete(array.get(pos_div_lines, asz - j))
+            array.pop(pos_div_lines)
+        if array.size(pos_div_labels) > 0
+            label.delete(array.get(pos_div_labels, array.size(pos_div_labels) - 1))
+            array.pop(pos_div_labels)
+
+delete_last_neg_div_lines_label(n) =>
+    if n > 0 and array.size(neg_div_lines) >= n
+        asz = array.size(neg_div_lines)
+        for j = 1 to n
+            line.delete(array.get(neg_div_lines, asz - j))
+            array.pop(neg_div_lines)
+        if array.size(neg_div_labels) > 0
+            label.delete(array.get(neg_div_labels, array.size(neg_div_labels) - 1))
+            array.pop(neg_div_labels)
+
+pos_reg_div_detected = false
+neg_reg_div_detected = false
+pos_hid_div_detected = false
+neg_hid_div_detected = false
+
+var last_pos_div_lines = 0
+var last_neg_div_lines = 0
+var remove_last_pos_divs = false
+var remove_last_neg_divs = false
+if not na(pl)
+    remove_last_pos_divs := false
+    last_pos_div_lines := 0
+if not na(ph)
+    remove_last_neg_divs := false
+    last_neg_div_lines := 0
+
+divergence_text_top = ""
+divergence_text_bottom = ""
+distances = array.new_int(0)
+dnumdiv_top = 0
+dnumdiv_bottom = 0
+top_label_col = color.white
+bottom_label_col = color.white
+old_pos_divs_can_be_removed = true
+old_neg_divs_can_be_removed = true
+startpoint = dontconfirm ? 0 : 1
+
+for x = 0 to 10
+    div_type = -1
+    for y = 0 to 3
+        if array.get(all_divergences, x * 4 + y) > 0
+            div_type := y
+            if (y % 2) == 1
+                dnumdiv_top := dnumdiv_top + 1
+                top_label_col := array.get(div_colors, y)
+            if (y % 2) == 0
+                dnumdiv_bottom := dnumdiv_bottom + 1
+                bottom_label_col := array.get(div_colors, y)
+            if not array.includes(distances, array.get(all_divergences, x * 4 + y))
+                array.push(distances, array.get(all_divergences, x * 4 + y))
+                new_line = showlines ? line.new(x1 = bar_index - array.get(all_divergences, x * 4 + y), y1 = (source == "Close" ? close[array.get(all_divergences, x * 4 + y)] : (y % 2) == 0 ? low[array.get(all_divergences, x * 4 + y)] : high[array.get(all_divergences, x * 4 + y)]), x2 = bar_index - startpoint, y2 = (source == "Close" ? close[startpoint] : (y % 2) == 0 ? low[startpoint] : high[startpoint]), color = array.get(div_colors, y), style = y < 2 ? reg_div_l_style : hid_div_l_style, width = y < 2 ? reg_div_l_width : hid_div_l_width) : na
+                if (y % 2) == 0
+                    if old_pos_divs_can_be_removed
+                        old_pos_divs_can_be_removed := false
+                        if not showlast and remove_last_pos_divs
+                            delete_last_pos_div_lines_label(last_pos_div_lines)
+                            last_pos_div_lines := 0
+                        if showlast
+                            delete_old_pos_div_lines()
+                    array.push(pos_div_lines, new_line)
+                    last_pos_div_lines := last_pos_div_lines + 1
+                    remove_last_pos_divs := true
+                if (y % 2) == 1
+                    if old_neg_divs_can_be_removed
+                        old_neg_divs_can_be_removed := false
+                        if not showlast and remove_last_neg_divs
+                            delete_last_neg_div_lines_label(last_neg_div_lines)
+                            last_neg_div_lines := 0
+                        if showlast
+                            delete_old_neg_div_lines()
+                    array.push(neg_div_lines, new_line)
+                    last_neg_div_lines := last_neg_div_lines + 1
+                    remove_last_neg_divs := true
+            if y == 0
+                pos_reg_div_detected := true
+            if y == 1
+                neg_reg_div_detected := true
+            if y == 2
+                pos_hid_div_detected := true
+            if y == 3
+                neg_hid_div_detected := true
+    if div_type >= 0
+        divergence_text_top    := divergence_text_top    + ((div_type % 2) == 1 ? (showindis != "Don't Show" ? array.get(indicators_name, x) + "\n" : "") : "")
+        divergence_text_bottom := divergence_text_bottom + ((div_type % 2) == 0 ? (showindis != "Don't Show" ? array.get(indicators_name, x) + "\n" : "") : "")
+
+if showindis != "Don't Show" or shownum
+    if shownum and dnumdiv_top > 0
+        divergence_text_top := divergence_text_top + str.tostring(dnumdiv_top)
+    if shownum and dnumdiv_bottom > 0
+        divergence_text_bottom := divergence_text_bottom + str.tostring(dnumdiv_bottom)
+    if divergence_text_top != ""
+        if showlast
+            delete_old_neg_div_labels()
+        array.push(neg_div_labels, label.new(x = bar_index, y = math.max(high, high[1]), text = divergence_text_top, color = top_label_col, textcolor = neg_div_text_col, style = label.style_label_down))
+    if divergence_text_bottom != ""
+        if showlast
+            delete_old_pos_div_labels()
+        array.push(pos_div_labels, label.new(x = bar_index, y = math.min(low, low[1]), text = divergence_text_bottom, color = bottom_label_col, textcolor = pos_div_text_col, style = label.style_label_up))
+
+alertcondition(pos_reg_div_detected, title = "Positive Regular Divergence Detected", message = "Positive Regular Divergence Detected")
+alertcondition(neg_reg_div_detected, title = "Negative Regular Divergence Detected", message = "Negative Regular Divergence Detected")
+alertcondition(pos_hid_div_detected, title = "Positive Hidden Divergence Detected", message = "Positive Hidden Divergence Detected")
+alertcondition(neg_hid_div_detected, title = "Negative Hidden Divergence Detected", message = "Negative Hidden Divergence Detected")
+alertcondition(pos_reg_div_detected or pos_hid_div_detected, title = "Positive Divergence Detected", message = "Positive Divergence Detected")
+alertcondition(neg_reg_div_detected or neg_hid_div_detected, title = "Negative Divergence Detected", message = "Negative Divergence Detected")
+// END

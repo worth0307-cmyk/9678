@@ -9,6 +9,9 @@
 python scripts/pine_strip_comments.py pine/impulse_wave_12345.pine pine/impulse_wave.pine
 ```
 
+`impulse_wave` 的图文版说明书在 `pine/docs/impulse_wave_manual.html`（用浏览器打开）：图上每种标记、
+细 / 中 / 粗三个尺度、调整目标横线、场景推演怎么定位置 / 高度 / 角度，配 BTC 4 小时实图和示意图。
+
 ---
 
 ## 先说一件会反复踩到的事：输入页 vs 样式页

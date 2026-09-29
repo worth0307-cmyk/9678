@@ -74,6 +74,14 @@ showPast = input.bool(true, "标出推演所接的这组浪已走过的部分", 
                "能直接看到推演是从哪里接上的。\n\n" +
                "它和已确认的 1-5 不是一回事：已确认的是不透明实线，不会再变；" +
                "这组浪还没走完，只是当前的数法，每根都会重算。")
+showInv = input.bool(true, "标出失效价（图上的「失」）", group = gP,
+     tooltip = "价格越过这里，当前这套数法就违反了艾略特的硬规则，推演作废、下一根改数。\n\n" +
+               "按推演接下来要走的那一段取：\n" +
+               "  浪2、浪3        浪1 的起点（浪2 不能越过它）\n" +
+               "  浪4、浪5        浪1 的终点（浪4 不能进入浪1 的价格区间）\n" +
+               "  A、B、C         浪5 的终点（越过说明推动浪还没走完）\n" +
+               "  新一轮的浪1、2  上一轮 C 的终点（新一轮浪2 不能越过它的起点）\n\n" +
+               "看涨时是「跌破」，看跌时是「涨过」。状态表和悬停浮窗里也有这个价位。")
 
 gS = "④ 样式"
 cA = input.color(#42a5f5, "级别「细」颜色", group = gS, inline = "A")
@@ -83,7 +91,8 @@ wB = input.int(2, "线宽", minval = 1, maxval = 6, group = gS, inline = "B")
 cC = input.color(#ffa726, "级别「粗」颜色", group = gS, inline = "C")
 wC = input.int(2, "线宽", minval = 1, maxval = 6, group = gS, inline = "C")
 starW   = input.int(2, "浪3 达标时额外加粗", minval = 0, maxval = 4, group = gS)
-lblSize = input.string("tiny", "图上标签大小", options = ["tiny", "small", "normal"], group = gS)
+lblSize = input.string("小", "图上标签字号", options = ["小", "中", "大"], group = gS,
+     tooltip = "图上所有带颜色的小标记：已确认的 (1)..(5)、推演的浪名、这组浪的 0、失效价的「失」。")
 projLbl = input.string("浪名", "推演标签内容", options = ["浪名", "浪名 + 价位 + %"], group = gS,
      tooltip = "默认只写浪名（A、(3) 这样），不挡K线。**鼠标移到图上任何一个标签上**，会弹出正常字号的详情：\n" +
                "  推演点：终点价、离现价多少 %、大约几根后到（估算日期）、" +
@@ -114,7 +123,7 @@ atrRaw = ta.atr(atrLen)
 atrOk  = not na(atrRaw)
 atrV   = nz(atrRaw, syminfo.mintick * 10.0)
 
-szLbl = lblSize == "normal" ? size.normal : lblSize == "small" ? size.small : size.tiny
+szLbl = lblSize == "大" ? size.normal : lblSize == "中" ? size.small : size.tiny
 szT   = tblSz == "大" ? size.large : tblSz == "中" ? size.normal : tblSz == "小" ? size.small : size.tiny
 posT  = tblPos == "右上" ? position.top_right : tblPos == "右中" ? position.middle_right : tblPos == "左下" ? position.bottom_left : tblPos == "左中" ? position.middle_left : tblPos == "左上" ? position.top_left : tblPos == "中下" ? position.bottom_center : tblPos == "中上" ? position.top_center : position.bottom_right
 direct = detailMode == "直接显示（手机）"
@@ -163,25 +172,26 @@ type Lv
     int          li
     string       tag
     string       dupOf
+    string       note3
 
 var Lv LA = Lv.new(name = "细", mult = useA, col = cA, wid = wA, on = onA, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
      sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
-     dCells = array.new<string>(), li = 0, tag = "细", dupOf = "")
+     dCells = array.new<string>(), li = 0, tag = "细", dupOf = "", note3 = "")
 var Lv LB = Lv.new(name = "中", mult = useB, col = cB, wid = wB, on = onB, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
      sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
-     dCells = array.new<string>(), li = 1, tag = "中", dupOf = "")
+     dCells = array.new<string>(), li = 1, tag = "中", dupOf = "", note3 = "")
 var Lv LC = Lv.new(name = "粗", mult = useC, col = cC, wid = wC, on = onC, dir = 0,
      ext = na, extBi = na, ext2 = na, ext2Bi = na,
      pv = array.new<Piv>(), ws = array.new<Wave>(), zz = array.new<line>(),
      hits = 0, lastDir = 0, pvTotal = 0,
      sL = array.new<line>(), sB = array.new<label>(), sK = -1, sP0 = -1, note = "", note2 = "", tip = "",
-     dCells = array.new<string>(), li = 2, tag = "粗", dupOf = "")
+     dCells = array.new<string>(), li = 2, tag = "粗", dupOf = "", note3 = "")
 
 method zigzag(Lv L, float thr) =>
     bool confirmed = false
@@ -539,6 +549,7 @@ method scenario(Lv L) =>
     L.sP0   := -1
     L.note  := ""
     L.note2 := ""
+    L.note3 := ""
     L.tip   := ""
     array.clear(L.dCells)
     int n = array.size(L.pv)
@@ -771,6 +782,52 @@ method scenario(Lv L) =>
         L.note2 := scName(array.get(pw, np - 1)) + " " + str.tostring(yEnd, format.mintick)
              + " (" + (chgEnd >= 0 ? "+" : "") + str.tostring(chgEnd, "#.#") + "%)"
 
+        int    jInv   = -1
+        string invWhy = "浪2 不能越过浪1 的起点（这组浪的 0）"
+        string invBrf = "浪1 起点"
+        if f >= 8
+            jInv   := 7
+            invWhy := "新一轮的浪2 不能越过它的起点（上一轮 C 的终点）"
+            invBrf := "C 终点"
+        else if f >= 5
+            jInv   := 4
+            invWhy := "调整浪不能越过浪5 的终点 —— 越过说明推动浪还没走完"
+            invBrf := "浪5 终点"
+        else if f >= 3
+            jInv   := 0
+            invWhy := "浪4 不能进入浪1 的价格区间（浪1 的终点）"
+            invBrf := "浪1 终点"
+        float xInv = jInv < 0 ? x0 : array.get(E, jInv)
+        if jInv == 0
+            xInv := xInv - ovTol * (array.get(E, 0) - x0)
+        float invPx = s * xInv
+        bool  invUp = (f >= 5 and f <= 7) == bull
+        int   invBi = q0.bi
+        if jInv >= 0 and jInv < kk
+            Piv qInv = array.get(L.pv, n - kk + jInv)
+            invBi := qInv.bi
+        else if jInv >= 0
+            invBi := L.extBi
+        float chgInv = (invPx / close - 1.0) * 100.0
+        string invS = (invUp ? "涨过 " : "跌破 ") + str.tostring(invPx, format.mintick)
+        string chgInvS = (chgInv >= 0 ? "+" : "") + str.tostring(chgInv, "#.#") + "%"
+        bool invHit = invUp ? close > invPx : close < invPx
+        string invStale = "价格已经" + invS + "，这套数法其实已经作废；但反向还没走出 ATR×"
+             + str.tostring(L.mult) + "，ZigZag 没确认新的转折，所以暂时沿用。等下一个转折确认，推演会改数。"
+        L.note3 := invHit ? "⚠已" + invS + " · 已作废" : invS + " (" + chgInvS + ")"
+        if showInv
+            string tipI = "级别「" + L.tag + "」 · 失效价\n"
+                 + (invHit ? invStale : invS + "（离现价 " + chgInvS + "）这套数法就作废")
+                 + "\n\n依据：" + invWhy
+                 + "\n\n现在的数法：" + pos + "，推演接下来走 " + scName(f)
+                 + (invHit ? "" : "\n价格没越过这里之前，这套数法和推演都还成立；越过了，下一根会改数。")
+            array.push(L.sL, line.new(invBi, invPx, bar_index + 3 + 3 * L.li, invPx, xloc = xloc.bar_index,
+                 color = color.new(c, 30), style = line.style_dotted, width = 1))
+            array.push(L.sB, label.new(bar_index + 3 + 3 * L.li, invPx,
+                 fullLbl ? L.tag + " 失 " + str.tostring(invPx, format.mintick) : "失",
+                 xloc = xloc.bar_index, style = label.style_label_left,
+                 color = color.new(c, 25), textcolor = color.white, size = szLbl, tooltip = tipI))
+
         if done
             float cD = (L.ext / close - 1.0) * 100.0
             array.push(L.dCells, scName(kk) + "?")
@@ -789,6 +846,11 @@ method scenario(Lv L) =>
             array.push(L.dCells, "约 " + str.tostring(ar) + " 根 · "
                  + str.format_time(time + ar * tfSec * 1000, tfSec >= 86400 ? "MM-dd" : "MM-dd HH:mm", syminfo.timezone))
             array.push(L.dCells, array.get(Wb, wr))
+        array.push(L.dCells, "失效")
+        array.push(L.dCells, str.tostring(invPx, format.mintick))
+        array.push(L.dCells, chgInvS)
+        array.push(L.dCells, invHit ? "已越过·已作废" : invUp ? "涨过即作废" : "跌破即作废")
+        array.push(L.dCells, invBrf)
         array.push(L.dCells, "速度")
         array.push(L.dCells, "推动腿")
         array.push(L.dCells, str.tostring(vImp, format.mintick) + "/根")
@@ -796,6 +858,7 @@ method scenario(Lv L) =>
         array.push(L.dCells, str.tostring(vCor, format.mintick) + "/根")
 
         string tp = "当前位置：" + pos + "\n这组浪的起点 0：" + str.tostring(q0.price, format.mintick)
+             + "\n失效价：" + (invHit ? "⚠" + invStale : invS + "（离现价 " + chgInvS + "）· " + invWhy)
              + "\n\n推演路径（从现在起）："
         if done
             tp := tp + "\n  " + scName(kk) + "?   " + str.tostring(L.ext, format.mintick)
@@ -845,6 +908,7 @@ method mergeInto(Lv L, Lv K) =>
     L.dupOf := K.name
     L.note  := "同「" + K.name + "」的场景，不重复画"
     L.note2 := ""
+    L.note3 := K.note3
     L.tip   := "和「" + K.name + "」选中了同一个起点和位置，推演路径完全一样，"
          + "图上只画一条，标签写「" + K.tag + "·" + L.name + "」。\n\n" + K.tip
     L.dCells := array.copy(K.dCells)
@@ -898,9 +962,11 @@ method tblRow(Lv L, table tb, int r, float m) =>
          text_color = L.col, text_size = szT, text_halign = text.align_left, tooltip = tp)
     table.cell(tb, 4, r, L.on and showProj ? L.note2 : "",
          text_color = L.col, text_size = szT, text_halign = text.align_left, tooltip = tp)
+    table.cell(tb, 5, r, L.on and showProj ? L.note3 : "",
+         text_color = L.col, text_size = szT, text_halign = text.align_left, tooltip = tp)
 
 if showTbl and barstate.islast
-    var table tb = table.new(posT, 5, 14,
+    var table tb = table.new(posT, 6, 15,
          bgcolor = color.new(color.black, 15), border_width = 1,
          border_color = color.new(color.gray, 60),
          frame_width = 1, frame_color = color.new(color.gray, 40))
@@ -909,7 +975,8 @@ if showTbl and barstate.islast
          + "阈值：实际生效的 ATR 倍数\n"
          + "枢轴·命中：累计确认的枢轴数 · 完整 1-5 组数\n"
          + "当前位置：现在在走哪一浪\n"
-         + "推演终点：推演最后一段的终点价和离现价多少 %\n\n"
+         + "推演终点：推演最后一段的终点价和离现价多少 %\n"
+         + "失效价：价格越过这里，这套数法就违反艾略特硬规则、作废（图上的「失」）\n\n"
          + "字号在输入页 ④ 组「右下角状态表 · 字号」里改。"
     table.cell(tb, 0, 0, "级别",      text_color = color.silver, text_size = szT, tooltip = hTip)
     table.cell(tb, 1, 0, tfAuto ? "阈值(自动)" : "阈值(手动)", text_color = color.silver, text_size = szT,
@@ -917,6 +984,7 @@ if showTbl and barstate.islast
     table.cell(tb, 2, 0, "枢轴·命中", text_color = color.silver, text_size = szT, tooltip = hTip)
     table.cell(tb, 3, 0, "当前位置",  text_color = color.silver, text_size = szT, tooltip = hTip)
     table.cell(tb, 4, 0, "推演终点",  text_color = color.silver, text_size = szT, tooltip = hTip)
+    table.cell(tb, 5, 0, "失效价",    text_color = color.silver, text_size = szT, tooltip = hTip)
     LA.tblRow(tb, 1, useA)
     LB.tblRow(tb, 2, useB)
     LC.tblRow(tb, 3, useC)
@@ -924,7 +992,8 @@ if showTbl and barstate.islast
          + "「?」= 暂按「这一浪在极值处走完」往下推：要么它已越过斐波那契目标、价格也已回头，"
          + "要么它是新一轮的浪1、前面没有可数的浪。ZigZag 还没确认反转，所以这只是假设。\n\n"
          + "半透明实线 + 0、(1)… = 推演所接的这组浪已经走过的部分。\n"
-         + "几个级别推演相同时只画一条，标签写「中·粗」这样的共用名。\n\n"
+         + "几个级别推演相同时只画一条，标签写「中·粗」这样的共用名。\n"
+         + "「失」= 失效价：价格越过这里，这套数法就违反艾略特硬规则，推演作废、下一根改数。\n\n"
          + "推演只在最后一根上画，每来一根新K线都会重新判断位置、重画路径。\n\n"
          + "推演是规则的机械推论，不是信号。"
     table.cell(tb, 0, 4, "⚠", text_color = color.orange, text_size = szT, tooltip = fTip)
@@ -936,8 +1005,10 @@ if showTbl and barstate.islast
          text_halign = text.align_left, tooltip = fTip)
     table.cell(tb, 4, 4, "推演是推论，不是信号", text_color = color.orange, text_size = szT,
          text_halign = text.align_left, tooltip = fTip)
+    table.cell(tb, 5, 4, "失 = 越过即作废", text_color = color.orange, text_size = szT,
+         text_halign = text.align_left, tooltip = fTip)
 
-    table.clear(tb, 0, 5, 4, 13)
+    table.clear(tb, 0, 5, 5, 14)
     if direct and showProj
         Lv D = LA
         if detailLv == "中"
@@ -956,7 +1027,7 @@ if showTbl and barstate.islast
         else if nd == 0
             table.cell(tb, 0, 6, "暂无推演", text_color = color.silver, text_size = szT)
         else
-            for ri = 0 to math.min(nd, 8) - 1
+            for ri = 0 to math.min(nd, 9) - 1
                 for ci = 0 to 4
                     table.cell(tb, ci, 6 + ri, array.get(D.dCells, ri * 5 + ci),
                          text_color = ri == nd - 1 ? color.silver : D.col, text_size = szT,

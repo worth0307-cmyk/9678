@@ -144,7 +144,7 @@ section[id]{ scroll-margin-top:16px; }
   <h1><code>impulse_wave</code> 使用说明</h1>
   <p class="lede">这个 TradingView 指标用三个尺度数艾略特推动浪：把历史上已经走完的 1-2-3-4-5 画出来，再判断现在处在周期的哪一浪，按斐波那契比例和实测速度往后画几段推演。</p>
   <div class="meta">
-    <span><b>代码版本</b> 2026-09-25</span>
+    <span><b>代码版本</b> 2026-09-29</span>
     <span><b>文中所有图</b> 用仓库 BTCUSDT 永续 4 小时数据渲染，截至 2026-09-10 08:00</span>
     <span><b>适用</b> Pine Script v6</span>
   </div>
@@ -724,6 +724,7 @@ section[id]{ scroll-margin-top:16px; }
       <tr><td class="k"><span class="swatch dash" style="color:var(--lv1)"></span>虚线 + 浪名</td><td>场景推演：从现在往后的几段。标签默认只写浪名，比如 <code>A</code>、<code>(3)</code></td><td><strong>每根都重算</strong></td></tr>
       <tr><td class="k">带 <code>?</code> 的标签</td><td>推演暂时当这一浪在极值处走完：要么它已越过目标、价格也回头了；要么它是新一轮的浪 (1)，前面没有可数的浪</td><td>每根都重算</td></tr>
       <tr><td class="k"><code>中·粗 (2)</code> 这样的标签</td><td>几个级别的推演完全相同，只画一条，标签写所有共用它的级别。默认的「浪名」模式标签不写级别，悬停浮窗里能看到</td><td>每根都重算</td></tr>
+      <tr><td class="k"><span class="swatch dot" style="color:var(--lv2)"></span>点线 + 「失」</td><td>失效价：价格越过这里，这套数法就违反艾略特的硬规则，推演作废。点线从定出这个价位的那个转折点画过来，三个级别的「失」左右错开。见 <a href="#scenario">第 06 节</a></td><td>每根都重算</td></tr>
       <tr><td class="k"><span class="swatch dot" style="color:var(--lv1)"></span>点线</td><td>推演终点价的水平射线，从推演终点往右延伸</td><td>每根都重算</td></tr>
       <tr><td class="k"><span class="swatch" style="color:var(--faint)"></span>细折线（默认关）</td><td>ZigZag 骨架：这个级别确认过的所有枢轴。调阈值时打开看</td><td>已确认的部分不变</td></tr>
     </tbody>
@@ -2956,6 +2957,20 @@ section[id]{ scroll-margin-top:16px; }
   <p>推动腿是 1、3、5、A、C，调整腿是 2、4、B。每一类的速度是这几票的平均：这一组里已经走完的同类腿各一票；正在走的那段走了 3 根以上也算一票；这个级别最近 10 条腿的速度中位数也算一票。最后这一票是为了防止被单独一条腿带偏：只有一条腿可以参考时，它可能恰好走得特别慢或特别快。</p>
   <p>未来最多只能画到 500 根K线之后。整条推演超出时，各段按同一比例压缩，角度的相对关系不变。</p>
 
+  <h3>失效价：价格越过哪里，这套数法就作废</h3>
+  <p>每个级别标一个失效价（图上的「失」、状态表最后一列）。按推演接下来要走的那一段取：</p>
+  <div class="tbl"><table>
+    <thead><tr><th>接下来走</th><th>失效价</th><th>依据</th></tr></thead>
+    <tbody>
+      <tr><td class="k">浪2、浪3</td><td>浪1 的起点（这组浪的 0）</td><td>浪2 不能越过浪1 的起点</td></tr>
+      <tr><td class="k">浪4、浪5</td><td>浪1 的终点</td><td>浪4 不能进入浪1 的价格区间</td></tr>
+      <tr><td class="k">A、B、C</td><td>浪5 的终点</td><td>越过说明推动浪还没走完</td></tr>
+      <tr><td class="k">新一轮的浪1</td><td>上一轮 C 的终点</td><td>新一轮的浪2 不能越过它的起点</td></tr>
+    </tbody>
+  </table></div>
+  <p>看涨的数法写「跌破 X」，看跌的写「涨过 X」。同一段行情换个周期常常数出相反的方向，两种数法都还活着时指标给不出方向；<strong>哪边的失效价先被碰到，哪边就出局</strong>。见 <a href="#faq">常见问题</a>。</p>
+  <p>偶尔会看到 <code>⚠已跌破 X · 已作废</code>：价格已经越过了失效价，但反向还没走出 ATR 阈值，ZigZag 没确认新的转折，只能暂时沿用。这时推演已经不成立，等下一个转折确认后会改数。</p>
+
   <h3>正在走的那一浪：三种情况</h3>
   <figure>
     <div class="diagram"><svg viewBox="0 0 760 232" role="img" aria-label="正在走的浪3 和目标的三种关系：没到目标就画到目标；越过目标还在走就换延长档目标；越过目标且已回头就当它在极值处走完，从极值接浪4" font-size="12" fill="currentColor"><g transform="translate(0,0)"><text x="120" y="20" text-anchor="middle" font-size="13" font-weight="700">没到目标</text><line x1="0" y1="89" x2="240" y2="89" stroke-dasharray="3 4" stroke-width="1" style="stroke:var(--faint)"/><text x="238" y="84" text-anchor="end" style="fill:var(--muted)" font-size="11">目标 1.618</text><polyline points="10,190 55,140 80,170 150,120" fill="none" stroke-width="2" stroke-linejoin="round" stroke="currentColor"/><polyline points="150,120 205,89" fill="none" stroke-width="2" stroke-linejoin="round" style="stroke:var(--lv2)" stroke-dasharray="6 4"/><circle cx="150" cy="120" r="4.5" fill="currentColor"/><text x="154" y="138" text-anchor="start" font-size="11">现在</text><text x="55" y="130" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11">1</text><text x="80" y="185" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11">2</text><rect x="10" y="200" width="220" height="24" rx="4" fill="currentColor" fill-opacity=".07"/><text x="120" y="216" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11.5">(3) 进行中</text></g><g transform="translate(260,0)"><text x="120" y="20" text-anchor="middle" font-size="13" font-weight="700">越过目标、还在走</text><line x1="0" y1="89" x2="240" y2="89" stroke-dasharray="3 4" stroke-width="1" style="stroke:var(--faint)"/><text x="238" y="84" text-anchor="end" style="fill:var(--muted)" font-size="11">原目标 1.618</text><line x1="0" y1="39" x2="240" y2="39" stroke-dasharray="3 4" stroke-width="1" style="stroke:var(--faint)"/><text x="238" y="34" text-anchor="end" style="fill:var(--muted)" font-size="11">延长档 2.618</text><polyline points="10,190 55,140 80,170 150,70" fill="none" stroke-width="2" stroke-linejoin="round" stroke="currentColor"/><polyline points="150,70 190,39" fill="none" stroke-width="2" stroke-linejoin="round" style="stroke:var(--lv2)" stroke-dasharray="6 4"/><circle cx="150" cy="70" r="4.5" fill="currentColor"/><text x="142" y="66" text-anchor="end" font-size="11">现在</text><text x="55" y="130" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11">1</text><text x="80" y="185" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11">2</text><rect x="10" y="200" width="220" height="24" rx="4" fill="currentColor" fill-opacity=".07"/><text x="120" y="216" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11.5">(3) 延长中</text></g><g transform="translate(520,0)"><text x="120" y="20" text-anchor="middle" font-size="13" font-weight="700">越过目标、已回头</text><line x1="0" y1="89" x2="240" y2="89" stroke-dasharray="3 4" stroke-width="1" style="stroke:var(--faint)"/><text x="238" y="84" text-anchor="end" style="fill:var(--muted)" font-size="11">目标 1.618</text><polyline points="10,190 55,140 80,170 125,70 160,100" fill="none" stroke-width="2" stroke-linejoin="round" stroke="currentColor"/><polyline points="125,70 205,120" fill="none" stroke-width="2" stroke-linejoin="round" style="stroke:var(--lv2)" stroke-dasharray="6 4"/><circle cx="125" cy="70" r="3" fill="currentColor"/><circle cx="160" cy="100" r="4.5" fill="currentColor"/><text x="125" y="58" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" style="fill:var(--lv2)" font-weight="700">(3)?</text><text x="156" y="118" text-anchor="end" font-size="11">现在</text><text x="212" y="136" text-anchor="start" font-family="JetBrains Mono, ui-monospace, monospace" style="fill:var(--lv2)">(4)</text><text x="55" y="130" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11">1</text><text x="80" y="185" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11">2</text><rect x="10" y="200" width="220" height="24" rx="4" fill="currentColor" fill-opacity=".07"/><text x="120" y="216" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11.5">(3)? 越过目标·已回头</text></g><line x1="250" y1="6" x2="250" y2="226" stroke-width="1" style="stroke:var(--rule)"/><line x1="510" y1="6" x2="510" y2="226" stroke-width="1" style="stroke:var(--rule)"/></svg></div>
@@ -2979,11 +2994,11 @@ section[id]{ scroll-margin-top:16px; }
   <figure>
     <div class="tv">
       <table class="tv-table">
-        <tr class="h"><td>级别</td><td>阈值(自动)</td><td>枢轴·命中</td><td>当前位置</td><td>推演终点</td></tr>
-        <tr><td class="c1">细</td><td class="c1">ATR×2</td><td class="c1">769 · 29</td><td class="c1">(3) 进行中</td><td class="c1">A 76,278.9 (-2%)</td></tr>
-        <tr><td class="c2">中</td><td class="c2">ATR×4</td><td class="c2">243 · 4</td><td class="c2">A 进行中</td><td class="c2">(1)′ 75,509.7 (-3%)</td></tr>
-        <tr><td class="c3">粗</td><td class="c3">关</td><td class="c3"></td><td class="c3"></td><td class="c3"></td></tr>
-        <tr><td class="cw">⚠</td><td class="cw">10281 根</td><td class="cw">悬停看明细</td><td class="cw">? = 暂按极值处走完（假设）</td><td class="cw">推演是推论，不是信号</td></tr>
+        <tr class="h"><td>级别</td><td>阈值(自动)</td><td>枢轴·命中</td><td>当前位置</td><td>推演终点</td><td>失效价</td></tr>
+        <tr><td class="c1">细</td><td class="c1">ATR×2</td><td class="c1">769 · 29</td><td class="c1">(3) 进行中</td><td class="c1">A 76,278.9 (-2%)</td><td class="c1">涨过 80,536.1 (+3.5%)</td></tr>
+        <tr><td class="c2">中</td><td class="c2">ATR×4</td><td class="c2">243 · 4</td><td class="c2">A 进行中</td><td class="c2">(1)′ 75,509.7 (-3%)</td><td class="c2">涨过 82,282.8 (+5.7%)</td></tr>
+        <tr><td class="c3">粗</td><td class="c3">关</td><td class="c3"></td><td class="c3"></td><td class="c3"></td><td class="c3"></td></tr>
+        <tr><td class="cw">⚠</td><td class="cw">10281 根</td><td class="cw">悬停看明细</td><td class="cw">? = 暂按极值处走完（假设）</td><td class="cw">推演是推论，不是信号</td><td class="cw">失 = 越过即作废</td></tr>
       </table>
     </div>
     <figcaption><b>图 9</b>　状态表，数值来自图 1 那一刻。你图上的枢轴数和命中数会不同，因为 TradingView 加载的历史长度不同。</figcaption>
@@ -2996,6 +3011,7 @@ section[id]{ scroll-margin-top:16px; }
       <tr><td class="k">枢轴·命中</td><td>累计确认的转折点数 · 累计确认的完整 1-5 组数</td></tr>
       <tr><td class="k">当前位置</td><td>现在在走哪一浪，以及三种情况里的哪一种</td></tr>
       <tr><td class="k">推演终点</td><td>推演最后一段的终点价，和离现价多少 %</td></tr>
+      <tr><td class="k">失效价</td><td>越过就作废的价位，和离现价多少 %。<code>⚠已跌破 X · 已作废</code> 是已经越过、在等新转折确认</td></tr>
     </tbody>
   </table></div>
   <p>「当前位置」这一列还可能出现这些提示：</p>
@@ -3023,6 +3039,8 @@ section[id]{ scroll-margin-top:16px; }
 已确认枢轴 243 个 · 完整 1-5 共 4 组
 
 当前位置：A 进行中
+这组浪的起点 0：62,228.8
+失效价：涨过 82,282.8（离现价 +5.7%）· 调整浪不能越过浪5 的终点 —— 越过说明推动浪还没走完
 
 推演路径（从现在起）：
   现在   77,816.4
@@ -3055,6 +3073,7 @@ section[id]{ scroll-margin-top:16px; }
         <tr class="c2"><td>B</td><td>79,511.2</td><td>+2.2%</td><td>约 45 根 · 09-17 20:00</td><td>回撤A 0.618</td></tr>
         <tr class="c2"><td>C</td><td>72,255.8</td><td>-7.1%</td><td>约 74 根 · 09-22 16:00</td><td>C=1×A</td></tr>
         <tr class="c2"><td>(1)′</td><td>75,509.7</td><td>-3%</td><td>约 87 根 · 09-24 20:00</td><td>≈上轮浪1</td></tr>
+        <tr class="c2"><td>失效</td><td>82,282.8</td><td>+5.7%</td><td>涨过即作废</td><td>浪5 终点</td></tr>
         <tr class="cs"><td>速度</td><td>推动腿</td><td>254.5/根</td><td>调整腿</td><td>132.3/根</td></tr>
       </table>
     </div>
@@ -3105,6 +3124,7 @@ section[id]{ scroll-margin-top:16px; }
       <tr><td class="k">高度 · B 回撤 A</td><td class="d">0.618</td><td>常用 0.5 / 0.618</td></tr>
       <tr><td class="k">在推演终点价画水平射线</td><td class="d">开</td><td>从推演终点往右画一条点线</td></tr>
       <tr><td class="k">标出推演所接的这组浪已走过的部分</td><td class="d">开</td><td>起点 0、走完的每一浪、正在走的那一浪（到目前的极值）画成半透明实线，标上浪名。和已确认的 1-5 重合的五段不重画</td></tr>
+      <tr><td class="k">标出失效价（图上的「失」）</td><td class="d">开</td><td>每个级别标一个失效价：价格越过这里，这套数法就违反艾略特的硬规则。状态表和悬停浮窗里也有</td></tr>
     </tbody>
   </table></div>
 
@@ -3115,7 +3135,7 @@ section[id]{ scroll-margin-top:16px; }
     <tbody>
       <tr><td class="k">级别「细 / 中 / 粗」颜色、线宽</td><td class="d">蓝 / 紫 / 橙，2</td><td>浪线和推演线都用这个颜色</td></tr>
       <tr><td class="k">浪3 达标时额外加粗</td><td class="d">2</td><td>★ 那段在线宽上再加多少</td></tr>
-      <tr><td class="k">图上标签大小</td><td class="d">tiny</td><td>tiny / small / normal</td></tr>
+      <tr><td class="k">图上标签字号</td><td class="d">小</td><td>小 / 中 / 大。图上所有带颜色的小标记：已确认的 (1)…(5)、推演的浪名、这组浪的 0、失效价的「失」</td></tr>
       <tr><td class="k">推演标签内容</td><td class="d">浪名</td><td>「浪名 + 价位 + %」是长标签。手机直接显示模式会强制用长标签</td></tr>
       <tr><td class="k">推演线 线宽、样式</td><td class="d">2，虚线</td><td>虚线 / 点线 / 实线</td></tr>
       <tr><td class="k">画出 ZigZag 骨架、线宽、透明度</td><td class="d">关，1，55</td><td>调阈值时打开，看三个级别是不是分了层</td></tr>
@@ -3176,6 +3196,7 @@ section[id]{ scroll-margin-top:16px; }
   <h2><span class="n">12</span>常见问题</h2>
   <div class="answer"><span class="q">图上底部那条紫色横线是什么？</span><p>「中」级别已确认推动浪的 ABC 调整目标，见 <a href="#target">第 05 节</a>。</p></div>
   <div class="answer"><span class="q">细 / 中 / 粗是三种走势吗？</span><p>是同一段行情的三个尺度，大级别的一浪里包含小级别的一整组浪，见 <a href="#levels">第 03 节</a>。</p></div>
+  <div class="answer"><span class="q">同一个品种，12 小时图看涨、日线看跌，方向完全相反？</span><p>三个级别的阈值都是「那个周期的 ATR × 倍数」，12 小时的 ATR 只有日线的七成左右，所以 12 小时图上的「中」比日线的「中」细。一个小反弹在 12 小时图上算转折、在日线上不算，前面的转折点不同，艾略特规则淘汰掉的数法也就不同，结论可以整个翻过来。两种数法都没违规时，指标给不出方向，看两边的<strong>失效价</strong>谁先被碰到。见 <a href="#scenario">第 06 节</a>。</p></div>
   <div class="answer"><span class="q">加了指标以后 K 线被压扁了。</span><p>远处的推演点、调整目标横线都会被 TradingView 自动缩放算进去。右键点价格轴，勾选「仅缩放价格图表」，之后纵轴只看K线，超出的线在图边截掉。也可以把「往后推几段」调小，或在样式页关掉调整目标横线。</p></div>
   <div class="answer"><span class="q">推演为什么隔一会儿就变了？</span><p>推演只在最后一根K线上画，每来一根新K线（实时图上每一跳）都会重新判断位置、重画路径。另外 ZigZag 是从图表最早那根开始算的，往左拖加载更多历史后，整串转折点可能挪位。已确认的 1-5 和三角不会变。</p></div>
   <div class="answer"><span class="q">为什么「命中」是 0，图上没有 (1)…(5)？</span><p>三条硬规则很严，完整的 1-5 本来就少见。先看状态表的枢轴数：少于 12 个是样本太少，检查自动阈值是否打开；枢轴够多但命中是 0，就是这段行情里确实没有合规的推动浪。推演不受影响，照样会画。</p></div>

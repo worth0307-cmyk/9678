@@ -144,7 +144,7 @@ section[id]{ scroll-margin-top:16px; }
   <h1><code>impulse_wave</code> 使用说明</h1>
   <p class="lede">这个 TradingView 指标用三个尺度数艾略特推动浪：把历史上已经走完的 1-2-3-4-5 画出来，再判断现在处在周期的哪一浪，按斐波那契比例和实测速度往后画几段推演。</p>
   <div class="meta">
-    <span><b>代码版本</b> 2026-09-29</span>
+    <span><b>代码版本</b> 2026-09-30</span>
     <span><b>文中所有图</b> 用仓库 BTCUSDT 永续 4 小时数据渲染，截至 2026-09-10 08:00</span>
     <span><b>适用</b> Pine Script v6</span>
   </div>
@@ -3145,6 +3145,29 @@ section[id]{ scroll-margin-top:16px; }
       <tr><td class="k">直接显示时列出哪个级别</td><td class="d">细</td><td>细 / 中 / 粗</td></tr>
     </tbody>
   </table></div>
+
+  <h3>⑤ 多周期趋势标签（H / D / W）</h3>
+  <figure>
+    <div class="tv">
+      <table class="tv-table" style="font-size:15px">
+        <tr><td style="color:#fff">H</td><td style="color:#f23645">⬆</td><td class="cs">D</td><td style="color:#f23645">⬆</td><td class="cs">W</td><td style="color:#089981">⬇</td></tr>
+      </table>
+    </div>
+    <figcaption><b>图 13</b>　在 12 小时图上：12 小时和日线向上，周线向下。当前图表周期那个字母是亮白的。</figcaption>
+  </figure>
+  <p>H = 12 小时，D = 日线，W = 周线，<strong>向上红色箭头，向下绿色箭头</strong>。只在这三个周期的图上显示。三个周期各跑一遍和图上完全相同的 ZigZag 和数浪，取趋势方向：正在走推动浪（1~5，或新一轮浪1）取这组浪的方向，正在走调整浪（A、B、C）取调整的方向。浪2、浪4、B 这些逆向的小段不翻转趋势。鼠标移到箭头上，显示那个周期现在数到第几浪。</p>
+  <p>BTC 2022 年以来按「中」级别实测：12 小时和日线平均 50 多天翻一次，周线平均 13.6 周翻一次；三个周期方向一致的日子约占 58%。</p>
+  <div class="tbl"><table>
+    <thead><tr><th>设置项</th><th>默认</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td class="k">显示 H / D / W 趋势标签</td><td class="d">开</td><td>总开关</td></tr>
+      <tr><td class="k">按哪个级别判趋势</td><td class="d">中</td><td>细 / 中 / 粗。阈值用每个周期自己的自动档</td></tr>
+      <tr><td class="k">位置、字号</td><td class="d">右上，中</td><td>8 个位置；字号小 / 中 / 大。别和状态表选同一个位置</td></tr>
+      <tr><td class="k">向上 / 向下颜色</td><td class="d">红 / 绿</td><td></td></tr>
+      <tr><td class="k">箭头</td><td class="d">⬆ ⬇</td><td>有的手机会把 ⬆⬇ 显示成蓝色 emoji、颜色变不了，换成 ▲▼ 或 ↑↓</td></tr>
+    </tbody>
+  </table></div>
+  <p>在 12 小时图上看到的 D、W，是在这张图加载的那段历史上算的。ZigZag 是路径依赖的，和直接切到日线、周线图上看到的偶尔会有出入。</p>
 </section>
 
 <section id="style">

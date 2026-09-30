@@ -25,10 +25,16 @@ onC = input.bool(false, "启用级别「粗」", group = gZ,
      tooltip = "级别原来叫 A / B / C，现在改叫 细 / 中 / 粗 —— 因为推演会画出调整浪 A、B、C，" +
                "「B 级别的 A 浪」这种标签没法读。")
 
+autoMult(int sec, int lv) =>
+    float a = sec >= 2592000 ? 0.25 : sec >= 604800 ? 0.5 : sec >= 14400 ? 2.0 : 3.0
+    float b = sec >= 2592000 ? 0.50 : sec >= 604800 ? 1.0 : sec >= 14400 ? 4.0 : 6.0
+    float c = sec >= 2592000 ? 0.75 : sec >= 604800 ? 1.5 : sec >= 14400 ? 8.0 : 12.0
+    lv == 0 ? a : lv == 1 ? b : c
+
 tfSec = timeframe.in_seconds()
-autoA = tfSec >= 2592000 ? 0.25 : tfSec >= 604800 ? 0.5 : tfSec >= 14400 ? 2.0 : 3.0
-autoB = tfSec >= 2592000 ? 0.50 : tfSec >= 604800 ? 1.0 : tfSec >= 14400 ? 4.0 : 6.0
-autoC = tfSec >= 2592000 ? 0.75 : tfSec >= 604800 ? 1.5 : tfSec >= 14400 ? 8.0 : 12.0
+autoA = autoMult(tfSec, 0)
+autoB = autoMult(tfSec, 1)
+autoC = autoMult(tfSec, 2)
 useA = tfAuto ? autoA : mA
 useB = tfAuto ? autoB : mB
 useC = tfAuto ? autoC : mC
@@ -119,13 +125,34 @@ detailMode = input.string("悬停浮窗（电脑）", "详情显示方式", opti
                "注意：指标设置跟着图表布局走，会在电脑和手机之间同步。")
 detailLv = input.string("细", "直接显示时列出哪个级别", options = ["细", "中", "粗"], group = gS)
 
+gM = "⑤ 多周期趋势标签（H / D / W）"
+showMtf = input.bool(true, "显示 H / D / W 趋势标签", group = gM,
+     tooltip = "H = 12 小时，D = 日线，W = 周线。只在这三个周期的图上显示，其他周期不显示。\n\n" +
+               "三个周期各自跑一遍和图上完全相同的 ZigZag 和数浪（按下面选的级别），取趋势方向：\n" +
+               "  正在走推动浪（1~5，或新一轮的浪1）→ 这组浪的方向\n" +
+               "  正在走调整浪（A、B、C）          → 调整的方向\n" +
+               "浪2、浪4、B 这些逆向的小段不翻转趋势。\n\n" +
+               "向上 = 红色箭头，向下 = 绿色箭头。鼠标移到箭头上看它现在数到第几浪。")
+mtfLv  = input.string("中", "按哪个级别判趋势", options = ["细", "中", "粗"], group = gM,
+     tooltip = "阈值按每个周期自己的自动档（12 小时、日线 ATR×2/4/8，周线 ×0.5/1/1.5）；" +
+               "① 组关了自动时，三个周期都用手动值。和切到那个周期的图上看到的数法一致。")
+mtfPos = input.string("右上", "位置", options = ["右上", "右中", "右下", "左上", "左中", "左下", "中上", "中下"],
+     group = gM, inline = "MP", tooltip = "别和右下角状态表选同一个位置，否则会叠在一起。")
+mtfSz  = input.string("中", "字号", options = ["小", "中", "大"], group = gM, inline = "MP")
+mtfUp  = input.color(#f23645, "向上", group = gM, inline = "MC")
+mtfDn  = input.color(#089981, "向下", group = gM, inline = "MC")
+mtfArr = input.string("⬆ ⬇", "箭头", options = ["⬆ ⬇", "▲ ▼", "↑ ↓"], group = gM, inline = "MC",
+     tooltip = "有的手机会把 ⬆⬇ 显示成蓝色的 emoji 方块，颜色就变不了了；那样换成 ▲▼ 或 ↑↓。")
+
 atrRaw = ta.atr(atrLen)
 atrOk  = not na(atrRaw)
 atrV   = nz(atrRaw, syminfo.mintick * 10.0)
 
 szLbl = lblSize == "大" ? size.normal : lblSize == "中" ? size.small : size.tiny
 szT   = tblSz == "大" ? size.large : tblSz == "中" ? size.normal : tblSz == "小" ? size.small : size.tiny
-posT  = tblPos == "右上" ? position.top_right : tblPos == "右中" ? position.middle_right : tblPos == "左下" ? position.bottom_left : tblPos == "左中" ? position.middle_left : tblPos == "左上" ? position.top_left : tblPos == "中下" ? position.bottom_center : tblPos == "中上" ? position.top_center : position.bottom_right
+posOf(string p) =>
+    p == "右上" ? position.top_right : p == "右中" ? position.middle_right : p == "左下" ? position.bottom_left : p == "左中" ? position.middle_left : p == "左上" ? position.top_left : p == "中下" ? position.bottom_center : p == "中上" ? position.top_center : position.bottom_right
+posT  = posOf(tblPos)
 direct = detailMode == "直接显示（手机）"
 stPrj = pStyle == "实线" ? line.style_solid : pStyle == "点线" ? line.style_dotted : line.style_dashed
 
@@ -393,23 +420,23 @@ lblSt(bool top, int li) =>
         st := top ? label.style_label_lower_right : label.style_label_upper_right
     st
 
-scValid(Lv L, int k) =>
-    int n = array.size(L.pv)
-    Piv q0 = array.get(L.pv, n - 1 - k)
+scValid(array<Piv> pvs, float ext, int k) =>
+    int n = array.size(pvs)
+    Piv q0 = array.get(pvs, n - 1 - k)
     bool bull = not q0.isHigh
     float s = bull ? 1.0 : -1.0
     bool ok = true
     array<float> x = array.new<float>()
     for i = 0 to k
-        Piv qi = array.get(L.pv, n - 1 - k + i)
+        Piv qi = array.get(pvs, n - 1 - k + i)
         array.push(x, s * qi.price)
         if qi.isHigh != ((i % 2 == 1) == bull)
             ok := false
         if i > 0
-            Piv qp = array.get(L.pv, n - 2 - k + i)
+            Piv qp = array.get(pvs, n - 2 - k + i)
             if qi.bi <= qp.bi
                 ok := false
-    float xe = s * L.ext
+    float xe = s * ext
     if ok and k >= 1
         float l1 = array.get(x, 1) - array.get(x, 0)
         if maxSpan > 0 and bar_index - q0.bi > maxSpan
@@ -532,6 +559,94 @@ scTgt(array<float> E, float x0, int j, bool ext, float eps) =>
         brf := "回撤浪1 " + str.tostring(ret2)
     [t, why, brf]
 
+mtfTrend(float mult) =>
+    var array<Piv> pvs = array.new<Piv>()
+    var int   d   = 0
+    var float ext = na
+    var int   eb  = na
+    var float e2  = na
+    var int   e2b = na
+    float a = ta.atr(atrLen)
+    if not na(a)
+        float thr = a * mult
+        if d == 0
+            if na(ext)
+                ext := high
+                eb  := bar_index
+                e2  := low
+                e2b := bar_index
+            else
+                if high > ext
+                    ext := high
+                    eb  := bar_index
+                if low < e2
+                    e2  := low
+                    e2b := bar_index
+                if close < ext - thr
+                    array.push(pvs, Piv.new(ext, eb, true))
+                    d   := -1
+                    ext := low
+                    eb  := bar_index
+                else if close > e2 + thr
+                    array.push(pvs, Piv.new(e2, e2b, false))
+                    d   := 1
+                    ext := high
+                    eb  := bar_index
+        else if d == 1
+            if high > ext
+                ext := high
+                eb  := bar_index
+            if close < ext - thr
+                array.push(pvs, Piv.new(ext, eb, true))
+                d   := -1
+                ext := low
+                eb  := bar_index
+        else
+            if low < ext
+                ext := low
+                eb  := bar_index
+            if close > ext + thr
+                array.push(pvs, Piv.new(ext, eb, false))
+                d   := 1
+                ext := high
+                eb  := bar_index
+        if array.size(pvs) > 24
+            array.shift(pvs)
+    int trend = 0
+    int kOut  = -1
+    int dnOut = 0
+    int n = array.size(pvs)
+    if d != 0 and n >= 2
+        int kk = 0
+        for k = math.min(7, n - 1) to 0
+            if scValid(pvs, ext, k)
+                kk := k
+                break
+        Piv q0 = array.get(pvs, n - 1 - kk)
+        bool bull = not q0.isHigh
+        float s = bull ? 1.0 : -1.0
+        float xe = s * ext
+        float x0 = s * q0.price
+        array<float> E = array.new<float>(10, na)
+        if kk > 0
+            for j = 0 to kk - 1
+                Piv pj = array.get(pvs, n - kk + j)
+                array.set(E, j, s * pj.price)
+        bool done = true
+        if kk > 0
+            [t0, w0, r0] = scTgt(E, x0, kk, false, syminfo.mintick)
+            bool up = kk % 2 == 0
+            bool beyond = up ? xe >= t0 : xe <= t0
+            if beyond and bar_index - eb <= 1
+                [t1, w1, r1] = scTgt(E, x0, kk, true, syminfo.mintick)
+                beyond := up ? xe >= t1 : xe <= t1
+            done := beyond
+        int f = done ? kk + 1 : kk
+        trend := ((f >= 5 and f <= 7) ? -1 : 1) * (bull ? 1 : -1)
+        kOut  := kk
+        dnOut := done ? 1 : 0
+    [trend, kOut, dnOut]
+
 method clearScen(Lv L) =>
     if array.size(L.sL) > 0
         for i = 0 to array.size(L.sL) - 1
@@ -559,7 +674,7 @@ method scenario(Lv L) =>
     else
         int kk = 0
         for k = math.min(7, n - 1) to 0
-            if scValid(L, k)
+            if scValid(L.pv, L.ext, k)
                 kk := k
                 break
         Piv q0 = array.get(L.pv, n - 1 - kk)
@@ -1032,6 +1147,41 @@ if showTbl and barstate.islast
                     table.cell(tb, ci, 6 + ri, array.get(D.dCells, ri * 5 + ci),
                          text_color = ri == nd - 1 ? color.silver : D.col, text_size = szT,
                          text_halign = ci == 4 ? text.align_left : text.align_center)
+
+mtfIdx = mtfLv == "细" ? 0 : mtfLv == "粗" ? 2 : 1
+mtfMult(int sec) =>
+    tfAuto ? autoMult(sec, mtfIdx) : mtfIdx == 0 ? mA : mtfIdx == 1 ? mB : mC
+
+[mtH, mkH, mdH] = request.security(syminfo.tickerid, "720", mtfTrend(mtfMult(43200)))
+[mtD, mkD, mdD] = request.security(syminfo.tickerid, "D", mtfTrend(mtfMult(86400)))
+[mtW, mkW, mdW] = request.security(syminfo.tickerid, "W", mtfTrend(mtfMult(604800)))
+
+mtfUpCh = mtfArr == "▲ ▼" ? "▲" : mtfArr == "↑ ↓" ? "↑" : "⬆"
+mtfDnCh = mtfArr == "▲ ▼" ? "▼" : mtfArr == "↑ ↓" ? "↓" : "⬇"
+szM     = mtfSz == "大" ? size.large : mtfSz == "小" ? size.small : size.normal
+
+mtfCell(table t, int i, string tag, string tfName, bool cur, int tr, int k, int dn) =>
+    int  f    = dn == 1 ? k + 1 : k
+    bool corr = f >= 5 and f <= 7
+    bool cnt  = corr ? tr < 0 : tr > 0
+    string tip = tfName + "：确认的转折点还不够，判断不了趋势"
+    if tr != 0
+        tip := tfName + " · 级别「" + mtfLv + "」\n"
+             + "现在：" + scName(k) + (dn == 1 ? "?（暂按走完），接下来走 " + scName(f) : " 进行中") + "\n"
+             + "数法：一组" + (cnt ? "看涨" : "看跌") + "的浪，" + (corr ? "正在走调整浪（A、B、C）" : "正在走推动浪")
+             + "\n→ 趋势" + (tr > 0 ? "向上" : "向下")
+             + "\n\n浪2、浪4、B 这些逆向的小段不翻转趋势。和切到" + tfName + "图上、「" + mtfLv + "」级别的数法一致"
+             + "（那张图加载的历史长度不同时，偶尔会有出入）。"
+    table.cell(t, 2 * i, 0, tag, text_color = cur ? color.white : color.silver, text_size = szM, tooltip = tip)
+    table.cell(t, 2 * i + 1, 0, tr > 0 ? mtfUpCh : tr < 0 ? mtfDnCh : "–",
+         text_color = tr > 0 ? mtfUp : tr < 0 ? mtfDn : color.gray, text_size = szM, tooltip = tip)
+
+if showMtf and barstate.islast and (tfSec == 43200 or tfSec == 86400 or tfSec == 604800)
+    var table mt = table.new(posOf(mtfPos), 6, 1, bgcolor = color.new(color.black, 30),
+         frame_width = 0, border_width = 0)
+    mtfCell(mt, 0, "H", "12 小时", tfSec == 43200, mtH, mkH, mdH)
+    mtfCell(mt, 1, "D", "日线", tfSec == 86400, mtD, mkD, mdD)
+    mtfCell(mt, 2, "W", "周线", tfSec == 604800, mtW, mkW, mdW)
 
 alertcondition(hitA or hitB or hitC, "推动浪成立（任意级别）", "1-2-3-4-5 推动浪校验通过")
 alertcondition(hitA, "推动浪成立 · 细", "级别「细」出现 1-2-3-4-5")

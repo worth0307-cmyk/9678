@@ -70,6 +70,14 @@
 > 但四年多六个币只有 11 笔、落在参数的一个尖上；交易笔数多十倍的 4 小时只剩每笔 +0.55%，
 > 两个零假设都不显著（p = 0.10 / 0.18）。**不建议交易。**
 
+> ## moomoo 版：两个 TradingView 指标搬到 moomoo（`moomoo_strat/README.md`）
+>
+> combo_overlay + impulse_wave。moomoo 的公式语言没有循环和数组，SuperTrend 和数浪写不进去，所以拆成两半：
+> **公式指标**只画均线和斐波那契；**Python** 通过 OpenD 读自选股分组，算全部指标，
+> 回测 8 套只做多的规则（200 日线基准、SuperTrend、推动浪 D/W 同向、五浪跌完抄底、组合），
+> 每套都和同仓位买入持有、随机择时比，再出每日筛选表，可把符合条件的股票同步进一个 moomoo 分组。
+> 股票上的结果要在你自己连了 OpenD 的电脑上跑出来；仓库六个币上离线试跑，没有一套显著好于同仓位买入持有。
+
 > ## 网格/马丁机器人的数字是怎么回事（`REPORT_GRID.md`）
 >
 > 在本仓库 26 个币的 1h 数据上复现了这类机器人：**胜率 100%、看板回撤 −0.1%、年化 +110%
@@ -307,6 +315,7 @@ vibt/
   factors.py      滚动 PCA：载荷、因子得分、残差（只用过去窗口，附组合因子敞口）
   edge.py         边际算术：胜率x赔率x成本x波动率 -> 最优止损、可达 Sharpe、确认所需笔数
   paper.py        纸面信号：只用已收盘的 K 线、可重放、可与真实成交对账
+moomoo_strat/     moomoo 版 combo_overlay + impulse_wave：OpenD 数据、8 套规则回测、每日筛选、公式指标
 scripts/          01~43，研究过程按顺序可复现
                   vps_setup.sh / vps_daily.sh / vps_cron.sh = VPS 安装、每日运行、挂 cron
                   10~11 = VI-Dashboard 通道打法的事件研究与回测

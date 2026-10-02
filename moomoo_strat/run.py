@@ -43,6 +43,10 @@ def load(a) -> tuple[dict, dict, str]:
     tag = a.group or "codes"
     if getattr(a, "codes_file", None):
         f = Path(a.codes_file)
+        if not f.exists():          # 不在仓库根目录跑时，也认相对仓库根目录或 universe/ 的写法
+            f = next((c for c in (HERE.parent / a.codes_file, HERE / "universe" / a.codes_file) if c.exists()), f)
+        if not f.exists():
+            sys.exit(f"找不到代码清单文件 {a.codes_file}")
         a.codes = ",".join(ln.split("#")[0].strip() for ln in f.read_text(encoding="utf-8").splitlines()
                            if ln.split("#")[0].strip())
         tag = f.stem

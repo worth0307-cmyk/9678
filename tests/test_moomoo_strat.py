@@ -113,3 +113,24 @@ def test_episodes_merge_trades_within_two_weeks():
     tr = [{"date": d("2020-03-16")}, {"date": d("2020-03-18")}, {"date": d("2020-03-27")},
           {"date": d("2022-06-13")}, {"date": d("2025-04-07")}, {"date": d("2025-04-08")}]
     assert R.episodes(tr) == 3
+
+
+def test_sized_matches_fade_path_when_uncapped():
+    """按笔分配资金在「每笔 1/N、不设上限」时，应该和逐只 1/N 固定仓位的五浪净值完全一样"""
+    from moomoo_strat import report as R
+    syms = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT")
+    feats = {s: S.features(D.load("1d", symbol=s), 365) for s in syms}
+    idx = pd.DatetimeIndex(sorted(set().union(*[feats[s]["f"].index for s in syms])))
+    port, trades = np.zeros(len(idx)), []
+    for s in syms:
+        f = feats[s]["f"]
+        wv = feats[s]["anyw"]["细"]                     # 用「任何净跌五段」，笔数多一些
+        net, _, tr, _ = S.fade(f, wv, 0.0005, sides=(1,))
+        port[idx.get_indexer(f.index)] += net / len(syms)
+        for t in tr:
+            t["code"] = s
+        trades += tr
+    assert len(trades) > 50
+    x, _, took, skip = R.sized(feats, trades, idx, 0.0005, 1 / len(syms), 10 ** 6)
+    assert took == len(trades) and skip == 0
+    np.testing.assert_allclose(x, port, atol=1e-12)

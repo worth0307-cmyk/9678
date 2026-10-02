@@ -79,11 +79,21 @@ class OpenD:
             df = df[df["stock_type"].astype(str).isin(["STOCK", "ETF"])]
         return df.reset_index(drop=True)
 
-    def set_group(self, group: str, codes: list[str]) -> tuple[list[str], list[str]]:
-        """把一个**自定义**分组同步成 codes：多的移出、少的加入。返回 (加入, 移出)。"""
+    def set_group(self, group: str, codes: list[str], dry: bool = False) -> tuple[list[str], list[str]]:
+        """把一个**自定义**分组同步成 codes：多的移出、少的加入。返回 (加入, 移出)。dry=True 只算不改。
+
+        系统分组（全部、美股、港股……）一律拒绝：同步会把不在信号里的股票移出去，等于清空你的自选。"""
         Op = self.mm.ModifyUserSecurityOp
-        cur = set(self.watchlist(group)["code"]) if group in set(self.groups()["group_name"]) else set()
+        g = self.groups()
+        row = g[g["group_name"] == group]
+        if row.empty:
+            raise RuntimeError(f"moomoo 里没有叫「{group}」的自选股分组 —— 先在 App 里建一个空分组")
+        if str(row["group_type"].iloc[0]).upper() != "CUSTOM":
+            raise RuntimeError(f"「{group}」是系统分组，不能拿来同步（会把里面不在信号里的股票都移出去）")
+        cur = set(self.watchlist(group)["code"])
         add, rem = sorted(set(codes) - cur), sorted(cur - set(codes))
+        if dry:
+            return add, rem
         if rem:
             self._ok(*self.ctx.modify_user_security(group, Op.MOVE_OUT, rem), f"从「{group}」移出")
         if add:

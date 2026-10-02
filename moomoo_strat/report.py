@@ -147,7 +147,7 @@ def backtest(feats: dict, names: dict, ann: int, cost: float, tag: str, null_rep
     except Exception as e:                       # 没装 matplotlib 或没中文字体，不影响表
         png = f"（没出图：{e}）"
     md = render(tab, ps, trades_all, fade_null, idx, NS, ann, cost, tag, png,
-                fade_detail(feats, trades_all, idx, cost, rng))
+                fade_detail(feats, trades_all, idx, cost, rng, bh, ann))
     Path(f"{stem}.md").write_text(md, encoding="utf-8")
     return md + f"\n\n文件：{stem}.md / _rules.csv / _stocks.csv / _trades.csv / _equity.png\n"
 
@@ -250,7 +250,41 @@ def num(v, fmt="+.2f"):
     return "" if v is None or (isinstance(v, float) and np.isnan(v)) else format(v, fmt)
 
 
-def fade_detail(feats: dict, trades: list, idx, cost: float, rng) -> list[str]:
+SIZING = ((0.05, 20), (0.10, 10), (0.20, 5))      # (每笔占当时资金的比例, 最多同时几笔)：满仓都是 100%，不加杠杆
+
+
+def sized(feats: dict, trades: list, idx, cost: float, frac: float, kmax: int) -> tuple[np.ndarray, np.ndarray, int, int]:
+    """按笔分配资金：每个信号拿当时资金的 frac，最多同时 kmax 笔，满了就跳过新信号（按进场日期先到先得）。
+    仓位每天按 frac 再平衡（近似），空闲资金不计利息。返回 (每日净收益, 每日在场比例, 做了几笔, 跳过几笔)。"""
+    T = len(idx)
+    net = np.zeros(T)
+    expo = np.zeros(T)
+    open_until: list[int] = []
+    took = skipped = 0
+    for t in sorted(trades, key=lambda t: (t["date"], t["code"])):
+        f = feats[t["code"]]["f"]
+        e = idx.get_loc(f.index[t["entry_i"]])
+        x = idx.get_loc(f.index[t["exit_i"]])
+        open_until = [u for u in open_until if u >= e]      # 当天开盘前已经平掉的才腾出位置
+        if len(open_until) >= kmax:
+            skipped += 1
+            continue
+        open_until.append(x)
+        took += 1
+        C = f["close"].to_numpy(dtype=float)
+        i0, i1 = t["entry_i"], t["exit_i"]
+        prices = np.r_[t["entry"], C[i0:i1], t["exit"]] if i1 > i0 else np.r_[t["entry"], t["exit"]]
+        r = prices[1:] / prices[:-1] - 1.0                  # 进场那天开盘 → 收盘，…，最后一天 → 离场价
+        days = [idx.get_loc(d) for d in f.index[i0:i1 + 1]]
+        net[days] += frac * r[: len(days)]
+        expo[days] += frac
+        net[e] -= frac * cost
+        if t["why"] != "持有中":
+            net[x] -= frac * cost
+    return net, expo, took, skipped
+
+
+def fade_detail(feats: dict, trades: list, idx, cost: float, rng, bh=None, ann: int = 252) -> list[str]:
     """五浪做多拆开看：前后半段、逐年、持有多久、括号多大，以及消融 —— 艾略特那几条规则到底有没有用"""
     L = []
     mid = idx[len(idx) // 2]
@@ -288,6 +322,18 @@ def fade_detail(feats: dict, trades: list, idx, cost: float, rng) -> list[str]:
                      f"不满足的 {len(rest)} 笔平均 {rest.mean():+.1%}、胜率 {(rest > 0).mean():.0%}；置换 p = {p:.3f}。"
                      + ("艾略特规则有增量。" if p < 0.05 else
                         "**看不出艾略特规则有增量**：起作用的主要是「跌了一大段、开始反弹就买」本身。"))
+        # 实际怎么用：只做这一条，每个信号分一份固定比例的资金
+        if bh is not None:
+            L += ["", f"按笔分配资金（只做 {r} 做多，别的都不做；满仓 100%、不加杠杆；空闲资金不计利息）：", "",
+                  "| 每笔资金 | 最多同时 | 年化 | 总收益 | Sharpe | 最大回撤 | 平均仓位 | 做了 / 满了跳过 | 同仓位买入持有 年化 / 回撤 |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+            for frac, kmax in SIZING:
+                x, ex, took, skip = sized(feats, tl, idx, cost, frac, kmax)
+                e = float(ex.mean())
+                bx = bh * e
+                L.append(f"| {frac:.0%} | {kmax} 笔 | {pct(x.mean() * ann)} | {pct(np.prod(1 + x) - 1)} | "
+                         f"{num(S.sharpe(x, ann))} | {pct(S.max_dd(x))} | {pct(e, False)} | {took} / {skip} | "
+                         f"{pct(bx.mean() * ann)} / {pct(S.max_dd(bx))} |")
         L.append("")
     if L:
         L = ["", "## 五浪做多：拆开看", "",
@@ -426,16 +472,18 @@ def screen(feats: dict, names: dict, cost: float, tag: str) -> tuple[pd.DataFram
         st = f["st"].to_numpy()
         flip = int(len(st) - 1 - np.flatnonzero(st != st[-1])[-1]) if (st != st[-1]).any() else len(st)
         chg = [f"{r}{'进' if pos[r][-1] else '出'}" for r in ("S0", "S1", "S2", "S4") if pos[r][-1] != pos[r][-2]]
-        fade_s = []
+        # 五浪只出做多：「涨完五浪做空」在 7姐妹 和 80 只大盘股上都比随机进场还差
+        fade_s, s3 = [], False
         for r, lv in S.FADE_RULES.items():
-            _, _, tr, pend = S.fade(f, F["waves"][lv], cost, sides=(1, -1))
+            _, _, tr, pend = S.fade(f, F["waves"][lv], cost, sides=(1,))
             for p in pend:
-                fade_s.append(f"{r} 今天确认{'跌' if p['side'] > 0 else '涨'}完五浪 → 明开{'做多' if p['side'] > 0 else '做空（回测里不进组合）'} "
-                              f"目标 {p['tgt']:.2f} 止损(收盘越过) {p['stop']:.2f}")
+                fade_s.append(f"{r} 今天确认跌完五浪 → 明天开盘买，目标 {p['tgt']:.2f}，收盘跌破 {p['stop']:.2f} 就卖")
             for t in tr:
                 if t["why"] == "持有中":
-                    fade_s.append(f"{r} {'多' if t['side'] > 0 else '空'}单持有中（{t['date'].date()} 进 {t['entry']:.2f}）"
-                                  f" 目标 {t['tgt']:.2f} 止损 {t['stop']:.2f}")
+                    fade_s.append(f"{r} 多单持有中（{t['date'].date()} 开盘 {t['entry']:.2f} 进），"
+                                  f"目标 {t['tgt']:.2f}，收盘跌破 {t['stop']:.2f} 就卖")
+            if r == "S3" and (pend or any(t["why"] == "持有中" for t in tr)):
+                s3 = True
         invD = f"{'涨过' if last['invUpD'] else '跌破'} {last['invD']:.2f}" if not pd.isna(last["invD"]) else ""
         invW = f"{'涨过' if last['invUpW'] else '跌破'} {last['invW']:.2f}" if not pd.isna(last["invW"]) else ""
         rows.append({
@@ -449,10 +497,10 @@ def screen(feats: dict, names: dict, cost: float, tag: str) -> tuple[pd.DataFram
             "200日线": round(last["ma200"], 3) if not pd.isna(last["ma200"]) else None,
             "50周线": round(last["ma50w"], 3) if not pd.isna(last["ma50w"]) else None,
             "一年区间位置": f"{last['fib_pos']:.0%}" if not pd.isna(last["fib_pos"]) else "",
-            **{r: "✓" if pos[r][-1] else "" for r in ("S0", "S1", "S2", "S4")},
+            **{r: "✓" if pos[r][-1] else "" for r in ("S0", "S1", "S2", "S4")}, "S3": "✓" if s3 else "",
             "今日变化": " ".join(chg), "五浪": "；".join(fade_s),
         })
-    t = pd.DataFrame(rows).sort_values(["S4", "S2", "S1", "代码"], ascending=[False, False, False, True])
+    t = pd.DataFrame(rows).sort_values(["S3", "S4", "S2", "S1", "代码"], ascending=[False, False, False, False, True])
     OUT.mkdir(exist_ok=True)
     path = OUT / f"screen_{tag}_{dt.date.today():%Y%m%d}.csv"
     t.to_csv(path, index=False, encoding="utf-8-sig")

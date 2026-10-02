@@ -1,0 +1,98 @@
+# 样本外检验用：80 只美股大盘股，不含 7姐妹 和 SPY / QQQ。
+# 2015 年以前就上市，横跨科技、金融、医药、消费、工业、能源、公用事业、汽车，
+# 涨得好的（LLY、AVGO、COST）和落后的（INTC、PFE、VZ、BA、NKE、F）都有。
+# 有过大额拆分子公司、价格可能对不上复权的（GE、MMM、T）以及近年被收购退市的没放进来。
+# 仍然有幸存者偏差：都是今天还在的大公司。但比「我关注的股票」小得多。
+#
+#   python moomoo_strat/run.py backtest --codes-file moomoo_strat/universe/us_large80.txt
+#
+# 会用掉 80 只的历史 K 线额度（30 天内）。
+
+# 科技、通信
+US.ORCL
+US.CSCO
+US.IBM
+US.INTC
+US.QCOM
+US.TXN
+US.AMD
+US.AVGO
+US.ADBE
+US.CRM
+US.NFLX
+US.INTU
+US.AMAT
+US.MU
+US.ADI
+US.CMCSA
+US.VZ
+US.DIS
+US.EBAY
+# 金融
+US.JPM
+US.BAC
+US.WFC
+US.C
+US.GS
+US.MS
+US.AXP
+US.BLK
+US.SCHW
+US.USB
+US.PNC
+US.MET
+US.AIG
+US.BK
+# 医药
+US.JNJ
+US.PFE
+US.MRK
+US.ABBV
+US.LLY
+US.UNH
+US.CVS
+US.AMGN
+US.GILD
+US.BMY
+US.MDT
+US.ABT
+US.TMO
+# 消费
+US.PG
+US.KO
+US.PEP
+US.WMT
+US.COST
+US.HD
+US.LOW
+US.MCD
+US.SBUX
+US.NKE
+US.TGT
+US.MO
+US.PM
+US.CL
+US.MDLZ
+# 工业
+US.CAT
+US.DE
+US.HON
+US.UPS
+US.FDX
+US.LMT
+US.BA
+US.UNP
+# 能源
+US.XOM
+US.CVX
+US.COP
+US.SLB
+US.OXY
+US.EOG
+# 公用事业
+US.NEE
+US.DUK
+US.SO
+# 汽车
+US.F
+US.GM

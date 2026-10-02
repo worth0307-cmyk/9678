@@ -105,3 +105,11 @@ def test_fade_long_hits_target():
     assert len(tr) == 1 and tr[0]["why"] == "到目标" and tr[0]["exit_i"] == 4
     assert tr[0]["ret"] == pytest.approx(12.0 / 10.0 - 1)
     assert np.prod(1 + net) - 1 == pytest.approx(12.0 / 10.0 - 1)
+
+
+def test_episodes_merge_trades_within_two_weeks():
+    from moomoo_strat import report as R
+    d = pd.Timestamp
+    tr = [{"date": d("2020-03-16")}, {"date": d("2020-03-18")}, {"date": d("2020-03-27")},
+          {"date": d("2022-06-13")}, {"date": d("2025-04-07")}, {"date": d("2025-04-08")}]
+    assert R.episodes(tr) == 3

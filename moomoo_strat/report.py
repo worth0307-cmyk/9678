@@ -93,7 +93,7 @@ def backtest(feats: dict, names: dict, ann: int, cost: float, tag: str, null_rep
         expo[r] = float(port(held).mean())
         per_stock[r] = {c: S.sharpe(each[c][WARM:], ann) for c in codes}
         trades_all += tr_all
-        fade_null[r] = bracket_null(feats, tr_all, cost, rng)
+        fade_null[r] = (bracket_null(feats, tr_all, cost, rng), shift_null(feats, tr_all, cost, rng))
     per_stock["买入持有"] = {c: S.sharpe(bh_each[c][WARM:], ann) for c in codes}
 
     # ---- 汇总表
@@ -121,10 +121,11 @@ def backtest(feats: dict, names: dict, ann: int, cost: float, tag: str, null_rep
         if r in S.FADE_RULES:
             tl = [t for t in trades_all if t["rule"] == r and t["side"] > 0]
             real = float(np.mean([t["ret"] for t in tl])) if tl else np.nan
-            nl = fade_null[r].get(1)
-            row.update(笔数=len(tl), 胜率=np.mean([t["ret"] > 0 for t in tl]) if tl else np.nan,
-                       平均每笔=real, p_随机括号=float((nl >= real).mean()) if nl is not None else np.nan)
-        row["结论"] = verdict(row)
+            nb, ns = (fade_null[r][0].get(1), fade_null[r][1].get(1))
+            row.update(笔数=len(tl), 独立时段=episodes(tl), 胜率=np.mean([t["ret"] > 0 for t in tl]) if tl else np.nan,
+                       平均每笔=real, p_随机括号=float((nb >= real).mean()) if nb is not None else np.nan,
+                       p_整体平移=float((ns >= real).mean()) if ns is not None else np.nan)
+        row["结论"] = verdict_fade(row) if r in S.FADE_RULES else verdict(row)
         rows.append(row)
     rows.append(dict(规则="B&H", 说明="等权买入持有（不计费用）", 年化=bh.mean() * ann,
                      复利总收益=np.prod(1 + bh) - 1, Sharpe=S.sharpe(bh, ann), 最大回撤=S.max_dd(bh), 平均仓位=1.0))
@@ -173,6 +174,60 @@ def bracket_null(feats: dict, trades: list, cost: float, rng, reps: int = 200) -
     return out
 
 
+def shift_null(feats: dict, trades: list, cost: float, rng, reps: int = 500) -> dict:
+    """更严的零假设：同一方向的全部交易一起往后挪同一个随机天数（每只股票在自己的区间里首尾相接），
+    方向、目标和止损距离、持有上限都不变。
+
+    几只股票同一天一起进场的「扎堆」原样保留。自选股里的大盘科技股同涨同跌，一次大跌往往让好几只
+    同一周一起出信号；逐笔独立随机会把它们当成好几次独立的机会，p 值就偏乐观，这里不会。"""
+    cache = {}
+    out = {}
+    for side in (1, -1):
+        tl = [t for t in trades if t["side"] == side]
+        if not tl:
+            continue
+        acc = np.zeros(reps)
+        for k in range(reps):
+            o = int(rng.integers(20, 10_000))
+            rets = []
+            for t in tl:
+                if t["code"] not in cache:
+                    f = feats[t["code"]]["f"]
+                    cache[t["code"]] = tuple(f[c].to_numpy(dtype=float) for c in ("open", "high", "low", "close"))
+                O, H, L, C = cache[t["code"]]
+                N = len(C)
+                e = WARM + (t["entry_i"] - WARM + o) % max(1, N - 2 - WARM)
+                en = O[e]
+                x, px, _ = S.sim(O, H, L, C, int(e), side, en * (1 + side * t["dt"]), en * (1 - side * t["ds"]),
+                                 N, None, max(1, t["hold"]))
+                rets.append(side * (px / en - 1.0) - 2 * cost)
+            acc[k] = np.mean(rets)
+        out[side] = acc
+    return out
+
+
+def episodes(trades: list, gap_days: int = 14) -> int:
+    """进场日期相隔不到两周的算同一个时段：同一次大跌里好几只一起出信号，只算一次"""
+    ds = sorted(t["date"] for t in trades)
+    return int(sum(1 for i, d in enumerate(ds) if i == 0 or (d - ds[i - 1]).days > gap_days))
+
+
+def verdict_fade(r: dict) -> str:
+    """五浪规则平均仓位只有百分之几，大部分时间空仓，和买入持有比 Sharpe 没有意义；看单笔有没有赢随机进场"""
+    n = r.get("笔数", 0)
+    if not n:
+        return "没有做多交易"
+    p = max(r.get("p_随机括号", np.nan), r.get("p_整体平移", np.nan))
+    ep = r.get("独立时段", n)
+    if p < 0.05 and ep >= 20:
+        return "单笔显著好于随机进场（仍需样本外再看）"
+    if p < 0.05:
+        return f"单笔好于随机进场，但只有 {n} 笔 / {ep} 个独立时段，不够下结论"
+    if p < 0.10:
+        return "单笔偏好于随机进场，证据不够"
+    return "单笔不比随机进场好"
+
+
 def verdict(r: dict) -> str:
     d, pb, psh = r["Sharpe差"], r["p_自助法"], r.get("p_随机择时", np.nan)
     pbr = r.get("p_随机括号", np.nan)
@@ -207,7 +262,8 @@ def render(tab, ps, trades, fade_null, idx, NS, ann, cost, tag, png) -> str:
         if "年化" not in r or pd.isna(r.get("年化")):
             L.append(f"| {r['规则']} | {r['说明']} | | | | | | | | | | | {r['结论']} |")
             continue
-        p2 = r.get("p_随机择时") if not pd.isna(r.get("p_随机择时", np.nan)) else r.get("p_随机括号", np.nan)
+        p2 = r.get("p_随机择时") if not pd.isna(r.get("p_随机择时", np.nan)) else \
+            max(r.get("p_随机括号", np.nan), r.get("p_整体平移", np.nan))
         L.append(f"| {r['规则']} | {r['说明']} | {pct(r['年化'])} | {pct(r['复利总收益'])} | {num(r['Sharpe'])} | "
                  f"{pct(r['最大回撤'])} | {pct(r['平均仓位'], False)} | {pct(r['同仓位买入持有年化'])} / "
                  f"{pct(r['同仓位买入持有回撤'])} | {num(r['Sharpe差'])} | {num(r['p_自助法'], '.3f')} | "
@@ -220,8 +276,10 @@ def render(tab, ps, trades, fade_null, idx, NS, ann, cost, tag, png) -> str:
           "所以不能拿它和满仓买入持有比收益或回撤，要和**同样仓位**的买入持有比；Sharpe 不随仓位缩放，差就是择时带来的部分。",
           "- **p 自助法**：分块自助法下 Sharpe 差 ≤ 0 的概率。",
           "- **p 随机择时**：把每只股票的持仓序列整体平移一个随机天数，仓位比例、每段持有多久、换手都不变，"
-          "只是时机错开；真规则的 Sharpe 不如这些随机版本的比例。五浪规则用**随机括号**：同方向、同目标和止损距离、"
-          "同持有上限，随便哪天进场。",
+          "只是时机错开；真规则的 Sharpe 不如这些随机版本的比例。",
+          "- **五浪规则（S3、S3M）另看**：平均仓位只有百分之几，大部分时间空仓，它的 Sharpe 差没有意义，"
+          "结论按**单笔**下：和**随机括号**（同方向、同目标和止损距离、同持有上限，随便哪天进场）、"
+          "**整体平移**（全部交易一起挪同一个随机天数，保留几只股票同一天一起进场的扎堆）比，表里取两个 p 里大的那个。",
           f"- **去偏**：一共试了 {len(S.RULES)} 套规则，挑最好的那套天然占便宜；这是扣掉这层运气之后，"
           "「超额（规则 − 同仓位买入持有）的真实 Sharpe > 0」的概率。",
           "- **前/后半段 Sharpe 差**：两段方向一致才像真的。", "",
@@ -234,15 +292,20 @@ def render(tab, ps, trades, fade_null, idx, NS, ann, cost, tag, png) -> str:
     if trades:
         tt = pd.DataFrame(trades)
         L += ["", "## 五浪反着做：逐笔", "",
-              "| 规则 | 方向 | 笔数 | 胜率 | 平均每笔 | 中位 | 随机括号平均 | p | 离场原因 |", "|---|---|---|---|---|---|---|---|---|"]
+              "| 规则 | 方向 | 笔数 | 独立时段 | 胜率 | 平均每笔 | 中位 | 随机括号平均 | p 随机括号 | p 整体平移 | 离场原因 |",
+              "|---|---|---|---|---|---|---|---|---|---|---|"]
         for (r, side), g in tt.groupby(["rule", "side"]):
-            nl = fade_null.get(r, {}).get(side)
+            nb, ns = (fade_null.get(r, ({}, {}))[0].get(side), fade_null.get(r, ({}, {}))[1].get(side))
             real = g["ret"].mean()
             why = "，".join(f"{k} {v}" for k, v in g["why"].value_counts().items())
             L.append(f"| {r} | {'跌完五浪做多' if side > 0 else '涨完五浪做空（不进组合）'} | {len(g)} | "
+                     f"{episodes(g.to_dict('records'))} | "
                      f"{(g['ret'] > 0).mean():.0%} | {pct(real)} | {pct(g['ret'].median())} | "
-                     f"{pct(nl.mean()) if nl is not None else ''} | "
-                     f"{num(float((nl >= real).mean()), '.3f') if nl is not None else ''} | {why} |")
+                     f"{pct(nb.mean()) if nb is not None else ''} | "
+                     f"{num(float((nb >= real).mean()), '.3f') if nb is not None else ''} | "
+                     f"{num(float((ns >= real).mean()), '.3f') if ns is not None else ''} | {why} |")
+        L += ["", "独立时段：进场日期相隔不到两周的算同一次（一次大跌里好几只一起出信号）。"
+                  "笔数再多，独立时段少，能下的结论也少。"]
 
     # 逐只
     L += ["", "## 逐只：Sharpe 高于这只股票自己的买入持有的比例", ""]

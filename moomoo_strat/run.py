@@ -40,8 +40,14 @@ def load(a) -> tuple[dict, dict, str]:
         names = a.symbols.split(",") if a.symbols else None
         dfs = DA.load_dir(Path(a.csv_dir), names, a.start)
         return dfs, {}, Path(a.csv_dir).name
+    tag = a.group or "codes"
+    if getattr(a, "codes_file", None):
+        f = Path(a.codes_file)
+        a.codes = ",".join(ln.split("#")[0].strip() for ln in f.read_text(encoding="utf-8").splitlines()
+                           if ln.split("#")[0].strip())
+        tag = f.stem
     if not (a.group or a.codes):
-        sys.exit("要么给 --group 自选股分组名，要么 --codes US.AAPL,US.MSFT，要么 --csv-dir 离线目录")
+        sys.exit("要么给 --group 自选股分组名，要么 --codes US.AAPL,US.MSFT 或 --codes-file，要么 --csv-dir 离线目录")
     with DA.OpenD(a.host, a.port) as od:
         if a.group:
             wl = od.watchlist(a.group)
@@ -50,11 +56,15 @@ def load(a) -> tuple[dict, dict, str]:
             codes, names = list(wl["code"]), dict(zip(wl["code"], wl["name"]))
         else:
             codes, names = a.codes.split(","), {}
-        used, remain = od.quota()
-        print(f"历史 K 线额度：已用 {used}，剩余 {remain}（30 天内不同股票只数；缓存里今天拉过的不再请求）")
+        used, remain, seen = od.quota()
+        new = [c for c in codes if c not in seen]
+        print(f"历史 K 线额度：已用 {used}，剩余 {remain}；这次 {len(codes)} 只里 {len(new)} 只是 30 天内没拉过的，"
+              f"会扣额度")
+        if len(new) > remain:
+            sys.exit(f"额度不够：要 {len(new)}，只剩 {remain}。等额度恢复（按 30 天滚动），或者少拉几只")
         print(f"拉 {len(codes)} 只的前复权日 K（{a.start} 起）…")
         dfs = DA.load_moomoo(od, codes, a.start, refresh=a.refresh)
-    return dfs, names, a.group or "codes"
+    return dfs, names, tag
 
 
 def cmd_check(a) -> None:
@@ -62,7 +72,7 @@ def cmd_check(a) -> None:
         st = od.state()
         print(f"OpenD 版本 {st.get('server_ver')}   行情登录 {'✓' if st.get('qot_logined') in ('1', 1, True) else '✗ 没登录'}"
               f"   美股 {st.get('market_us')}   港股 {st.get('market_hk')}")
-        used, remain = od.quota()
+        used, remain, _ = od.quota()
         print(f"历史 K 线额度：已用 {used}，剩余 {remain}")
         g = od.groups()
         print(f"\n自选股分组（{len(g)} 个）：")
@@ -127,6 +137,7 @@ def main() -> None:
         s.add_argument("--group", help="moomoo 自选股分组名（App 里看到的名字，如「全部」「美股」或自己建的）")
         if name != "check":
             s.add_argument("--codes", help="不用分组时直接给代码，逗号分隔：US.AAPL,HK.00700")
+            s.add_argument("--codes-file", help="代码清单文件，一行一个，# 后面是注释（例：moomoo_strat/universe/us_large80.txt）")
             s.add_argument("--start", default="2015-01-01", help="从哪天开始拉（默认 2015-01-01）")
             s.add_argument("--refresh", action="store_true", help="忽略今天的缓存，重新拉")
             s.add_argument("--cost-bps", type=float, default=5.0, help="每边费用 bps（美股 5，港股建议 15）")

@@ -10,6 +10,7 @@ OpenD 是 moomoo 官方的本地网关程序，Python 只跟它说话（默认 1
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import socket
 import time
 from pathlib import Path
@@ -39,6 +40,11 @@ class OpenD:
                 "  · OpenD 打开并登录了吗？注意 moomoo 桌面版 / App 不是 OpenD，OpenD 是另一个程序\n"
                 "  · OpenD 要和这个 Python 程序在同一台电脑上（OpenD 在 Windows、程序在 VPS 上是连不到的）\n"
                 "  · 改过端口的话加 --port") from e
+        try:                                    # SDK 每次连接、断开都往屏幕打一行 INFO，只留警告和错误
+            from moomoo.common.ft_logger import logger
+            logger.console_level = logging.WARNING
+        except Exception:
+            pass
         self.mm = mm
         self.ctx = mm.OpenQuoteContext(host=host, port=port)
 
@@ -56,9 +62,10 @@ class OpenD:
     def state(self) -> dict:
         return self._ok(*self.ctx.get_global_state(), "get_global_state")
 
-    def quota(self) -> tuple[int, int]:
-        used, remain, _ = self._ok(*self.ctx.get_history_kl_quota(get_detail=False), "get_history_kl_quota")
-        return used, remain
+    def quota(self) -> tuple[int, int, set]:
+        """(已用, 剩余, 30 天内已经拉过的代码) —— 拉过的再拉不扣额度"""
+        used, remain, detail = self._ok(*self.ctx.get_history_kl_quota(get_detail=True), "get_history_kl_quota")
+        return used, remain, {d.get("code") for d in (detail or [])}
 
     def groups(self) -> pd.DataFrame:
         return self._ok(*self.ctx.get_user_security_group(self.mm.UserSecurityGroupType.ALL),

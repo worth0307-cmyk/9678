@@ -31,11 +31,15 @@ exit /b 0
 :update
 rem The whole block is read before it runs, so overwriting this very file
 rem during the update is safe. When done, the menu reopens in a new window.
+rem Download and unzip with Python, not PowerShell: security software often
+rem blocks a .bat that launches PowerShell ("Access is denied").
 (
   echo Downloading the latest code to %REPO% ...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference='SilentlyContinue'; $z=Join-Path $env:TEMP '9678.zip'; Invoke-WebRequest -Uri '%ZIP%' -OutFile $z; Expand-Archive -Path $z -DestinationPath $env:USERPROFILE -Force"
+  python -c "import io,os,sys,urllib.request,zipfile; d=urllib.request.urlopen(sys.argv[1], timeout=180).read(); zipfile.ZipFile(io.BytesIO(d)).extractall(os.environ['USERPROFILE']); print('OK', len(d)//1024, 'KB')" "%ZIP%"
   if errorlevel 1 (
     echo Download failed. Check the network and try again.
+    echo Or download this zip in a browser and unzip it into %USERPROFILE% :
+    echo %ZIP%
     pause
     exit /b 1
   )

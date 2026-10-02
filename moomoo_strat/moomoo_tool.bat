@@ -20,6 +20,8 @@ if errorlevel 1 (
   exit /b 1
 )
 if not exist "%RUN%" goto update
+rem Code downloaded before the menu existed: update first.
+findstr /c:"def cmd_menu" "%RUN%" >nul 2>nul || goto update
 
 python "%RUN%" menu
 if errorlevel 99 goto update

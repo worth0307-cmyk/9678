@@ -53,6 +53,15 @@ def load(a) -> tuple[dict, dict, str]:
     if not (a.group or a.codes):
         sys.exit("要么给 --group 自选股分组名，要么 --codes US.AAPL,US.MSFT 或 --codes-file，要么 --csv-dir 离线目录")
     with DA.OpenD(a.host, a.port) as od:
+        if a.group == "?":                  # 列出分组、按编号选：bat 里不用输入中文
+            g = list(od.groups()["group_name"])
+            for n, name in enumerate(g, 1):
+                print(f"  {n:2d}  {name}")
+            while True:
+                pick = input("选哪个分组？输入编号后回车：").strip()
+                if pick.isdigit() and 1 <= int(pick) <= len(g):
+                    a.group = tag = g[int(pick) - 1]
+                    break
         if a.group:
             wl = od.watchlist(a.group)
             if wl.empty:
@@ -138,7 +147,8 @@ def main() -> None:
         s.set_defaults(fn=fn)
         s.add_argument("--host", default="127.0.0.1")
         s.add_argument("--port", type=int, default=11111)
-        s.add_argument("--group", help="moomoo 自选股分组名（App 里看到的名字，如「全部」「美股」或自己建的）")
+        s.add_argument("--group", help="moomoo 自选股分组名（App 里看到的名字，如「全部」「美股」或自己建的）；"
+                                       "填 ? 就列出全部分组、按编号选")
         if name != "check":
             s.add_argument("--codes", help="不用分组时直接给代码，逗号分隔：US.AAPL,HK.00700")
             s.add_argument("--codes-file", help="代码清单文件，一行一个，# 后面是注释（例：moomoo_strat/universe/us_large80.txt）")

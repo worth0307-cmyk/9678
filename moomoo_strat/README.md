@@ -89,6 +89,13 @@ cd ~/9678 && git pull
 没有 `.venv` 的话先 `python3 -m venv .venv`（报错就先 `apt install -y python3-venv`）。
 下面的命令在 VPS 上都把开头的 `python` 换成 `.venv/bin/python`。
 
+### Windows 最省事：双击 `moomoo_tool.bat`
+
+`moomoo_strat/moomoo_tool.bat` 是一个菜单：检查连接、回测 7姐妹 / 80 只大盘股 / 任选分组、今日筛选、
+同步信号分组、打开结果文件夹、更新代码，输编号回车就行，不用开 PowerShell、不用 cd。
+**把它复制到桌面**双击运行；第一次会自动下载代码、装依赖（只需要事先装好 Python）。
+「其他分组」会列出你所有的自选股分组、按编号选，不用打中文。
+
 ## 第三步：检查连接
 
 ```

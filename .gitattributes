@@ -1,0 +1,2 @@
+# Windows 批处理必须是 CRLF，原样存、原样出（GitHub 的 zip 下载不做换行转换）
+*.bat -text

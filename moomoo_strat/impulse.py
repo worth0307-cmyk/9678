@@ -155,6 +155,7 @@ def run(df: pd.DataFrame, mult: float, prm=PRM) -> dict:
     inv_up = np.zeros(N, dtype=bool)
     pv: list = []
     waves: list = []
+    anyw: list = []
     d, ext, ebi, e2, e2bi = 0, np.nan, -1, np.nan, -1
     for i in range(N):
         conf = False
@@ -199,11 +200,18 @@ def run(df: pd.DataFrame, mult: float, prm=PRM) -> dict:
                 full = abs(pr[5] - pr[0])
                 waves.append(dict(bull=bull, conf=i, p0=pr[0], p5=pr[5], b5=bi[5],
                                   tgt=pr[5] - full * prm["projRetr"] if bull else pr[5] + full * prm["projRetr"]))
+            # 消融用（scripts/60 同一个做法）：不管艾略特规则，任何一个刚确认的转折，只要最近五段
+            # 的净方向和它一致，都当成「五段走完」；ew 标出其中满足艾略特规则的那些
+            up = isH[5]
+            if (pr[5] > pr[0]) if up else (pr[5] < pr[0]):
+                full = abs(pr[5] - pr[0])
+                anyw.append(dict(bull=up, conf=i, p0=pr[0], p5=pr[5], b5=bi[5], ew=bool(ok),
+                                 tgt=pr[5] - full * prm["projRetr"] if up else pr[5] + full * prm["projRetr"]))
         r = position(pv, d, ext, ebi, i + 1, prm) if d != 0 else None
         if r is not None:
             trend[i], kk[i], ff[i], done[i] = r["trend"], r["k"], r["f"], r["done"]
             inv[i], inv_up[i] = r["inv"], r["inv_up"]
-    return dict(trend=trend, k=kk, f=ff, done=done, inv=inv, inv_up=inv_up, waves=waves)
+    return dict(trend=trend, k=kk, f=ff, done=done, inv=inv, inv_up=inv_up, waves=waves, anyw=anyw)
 
 
 def weekly(df: pd.DataFrame) -> pd.DataFrame:

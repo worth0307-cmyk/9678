@@ -60,9 +60,10 @@ def features(df: pd.DataFrame, ann: int) -> dict:
     f["ma50w"] = combo.ma50w(df)
     f["fib_hi"], f["fib_lo"], f["fib_pos"] = combo.fib_pos(df, ann)
     waves = {}
+    anyw = {}
     for lv in ("细", "中"):
         r = IW.run(df, IW.AUTO["D"][lv])
-        waves[lv] = r["waves"]
+        waves[lv], anyw[lv] = r["waves"], r["anyw"]
         if lv == "中":
             f["trD"], f["kD"], f["fD"], f["invD"], f["invUpD"] = r["trend"], r["k"], r["f"], r["inv"], r["inv_up"]
     # 周线：规则只用**走完的周**（历史上每周最后一个交易日收盘才更新），和回测口径一致。
@@ -78,7 +79,7 @@ def features(df: pd.DataFrame, ann: int) -> dict:
     for col in wk.columns:
         f[col] = IW.to_daily(wk[col], df.index)
     f["trW"] = f["trW"].fillna(0).astype(int)
-    return dict(f=f, waves=waves)
+    return dict(f=f, waves=waves, anyw=anyw)
 
 
 def positions(f: pd.DataFrame) -> dict[str, np.ndarray]:

@@ -146,7 +146,8 @@ def backtest(feats: dict, names: dict, ann: int, cost: float, tag: str, null_rep
         png = f"{stem}_equity.png"
     except Exception as e:                       # 没装 matplotlib 或没中文字体，不影响表
         png = f"（没出图：{e}）"
-    md = render(tab, ps, trades_all, fade_null, idx, NS, ann, cost, tag, png)
+    md = render(tab, ps, trades_all, fade_null, idx, NS, ann, cost, tag, png,
+                fade_detail(feats, trades_all, idx, cost, rng))
     Path(f"{stem}.md").write_text(md, encoding="utf-8")
     return md + f"\n\n文件：{stem}.md / _rules.csv / _stocks.csv / _trades.csv / _equity.png\n"
 
@@ -249,7 +250,52 @@ def num(v, fmt="+.2f"):
     return "" if v is None or (isinstance(v, float) and np.isnan(v)) else format(v, fmt)
 
 
-def render(tab, ps, trades, fade_null, idx, NS, ann, cost, tag, png) -> str:
+def fade_detail(feats: dict, trades: list, idx, cost: float, rng) -> list[str]:
+    """五浪做多拆开看：前后半段、逐年、持有多久、括号多大，以及消融 —— 艾略特那几条规则到底有没有用"""
+    L = []
+    mid = idx[len(idx) // 2]
+    for r, lv in S.FADE_RULES.items():
+        tl = [t for t in trades if t["rule"] == r and t["side"] > 0]
+        if not tl:
+            continue
+        tt = pd.DataFrame(tl)
+        tt["date"] = pd.to_datetime(tt["date"])
+        a, b = tt[tt["date"] < mid], tt[tt["date"] >= mid]
+        half = lambda g: f"{len(g)} 笔，胜率 {(g['ret'] > 0).mean():.0%}，平均 {g['ret'].mean():+.1%}" if len(g) else "0 笔"  # noqa: E731
+        yr = tt.groupby(tt["date"].dt.year)["ret"].agg(["count", "mean"])
+        L += [f"**{r} {S.RULES[r]}**（{len(tt)} 笔）", "",
+              f"- 前半段（~ {mid.date()}）{half(a)}；后半段 {half(b)}",
+              "- 逐年：" + "　".join(f"{y} {int(c)} 笔 {m:+.1%}" for y, (c, m) in yr.iterrows()),
+              f"- 持有中位 {tt['hold'].median():.0f} 个交易日；目标平均在进场价上方 {tt['dt'].mean():.1%}，"
+              f"止损（收盘跌破浪5）平均在下方 {tt['ds'].mean():.1%}；最好一笔 {tt['ret'].max():+.1%}，最差一笔 {tt['ret'].min():+.1%}"]
+        # 消融：同样的进出场，用在任何一次「净跌五段、刚确认反弹」上；比满足艾略特规则的和不满足的
+        ab = []
+        for c, F in feats.items():
+            ew_confs = {w["conf"] for w in F["waves"][lv]}
+            cand = [w for w in F["anyw"][lv] if w["conf"] >= WARM and not w["bull"]]
+            _, _, tr, _ = S.fade(F["f"], cand, cost, sides=(1,))
+            for t in tr:
+                t["ew"] = (t["entry_i"] - 1) in ew_confs
+            ab += tr
+        ew = np.array([t["ret"] for t in ab if t["ew"]])
+        rest = np.array([t["ret"] for t in ab if not t["ew"]])
+        if len(ew) and len(rest):
+            allr = np.r_[ew, rest]
+            perm = np.array([allr[rng.choice(len(allr), len(ew), replace=False)].mean() for _ in range(5000)])
+            p = float((perm >= ew.mean()).mean())
+            L.append(f"- 消融：同样的进出场用在**任何一次净跌五段之后的反弹**上（不管艾略特规则）。"
+                     f"满足艾略特规则的 {len(ew)} 笔平均 {ew.mean():+.1%}、胜率 {(ew > 0).mean():.0%}；"
+                     f"不满足的 {len(rest)} 笔平均 {rest.mean():+.1%}、胜率 {(rest > 0).mean():.0%}；置换 p = {p:.3f}。"
+                     + ("艾略特规则有增量。" if p < 0.05 else
+                        "**看不出艾略特规则有增量**：起作用的主要是「跌了一大段、开始反弹就买」本身。"))
+        L.append("")
+    if L:
+        L = ["", "## 五浪做多：拆开看", "",
+             "前后两段、每一年都赚，才像真的；消融回答「是数浪有用，还是只是跌多了反弹」。", ""] + L
+    return L
+
+
+def render(tab, ps, trades, fade_null, idx, NS, ann, cost, tag, png, extra=()) -> str:
     L = [f"# 回测：{tag}", "",
          f"{NS} 只 · {idx[0].date()} ~ {idx[-1].date()}（{len(idx)} 个交易日）· 每只固定 1/{NS} 仓 · 只做多 · "
          f"收盘出信号、次日开盘成交 · 每边 {cost * 1e4:.1f}bp · 每只前 {WARM} 根是指标预热期，不计入", "",
@@ -306,6 +352,7 @@ def render(tab, ps, trades, fade_null, idx, NS, ann, cost, tag, png) -> str:
                      f"{num(float((ns >= real).mean()), '.3f') if ns is not None else ''} | {why} |")
         L += ["", "独立时段：进场日期相隔不到两周的算同一次（一次大跌里好几只一起出信号）。"
                   "笔数再多，独立时段少，能下的结论也少。"]
+        L += list(extra)
 
     # 逐只
     L += ["", "## 逐只：Sharpe 高于这只股票自己的买入持有的比例", ""]

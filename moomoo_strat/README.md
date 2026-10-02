@@ -25,6 +25,20 @@ moomoo 的选股器同样只能用它内置的指标（MA、EMA、RSI、KDJ、MA
 
 ---
 
+## 先想好在哪台电脑上跑
+
+三样东西，别搞混：
+
+| 程序 | 干什么 | 装在哪 |
+|---|---|---|
+| **moomoo 桌面版**（`moomoo_desktop_xxx.exe`） | 平常看盘、下单；**公式指标要贴在这里** | 你的 Windows 电脑 |
+| **moomoo OpenD** | 给程序用的行情网关，**和桌面版是两个不同的程序**，要单独下载 | **和 Python 程序同一台电脑** |
+| Python 程序 `run.py` | 回测、筛选 | 同上 |
+
+Python 只连 `127.0.0.1`（本机）上的 OpenD，**OpenD 开在 Windows、程序在 VPS 上是连不到的**。
+推荐先**全部放在 Windows 电脑上**跑通：OpenD 有图形界面，登录、短信验证码都在窗口里点。
+以后想让 VPS 每天自动出筛选表，再在 VPS 上装命令行版 OpenD（要改配置文件、用 telnet 输验证码，麻烦一些）。
+
 ## 第一步：安装 OpenD 并登录
 
 OpenD 是 moomoo 官方的本地网关程序。Python 不直接连 moomoo 服务器，而是连你电脑上的 OpenD，
@@ -46,12 +60,27 @@ OpenD 是 moomoo 官方的本地网关程序。Python 不直接连 moomoo 服务
 1. 代码在 GitHub 仓库 `worth0307-cmyk/9678` 的 `claude/btcusdt-trading-system-hl6119` 分支。
    网页上切到这个分支 → Code → Download ZIP 解压，或者
    `git clone -b claude/btcusdt-trading-system-hl6119 https://github.com/worth0307-cmyk/9678.git`。
-2. 装 Python 3.9 或更新的版本（Windows 安装时勾上 *Add Python to PATH*）。
-3. 在仓库根目录打开终端（Windows 用 PowerShell 或 cmd），运行：
+2. 装 Python 3.9 或更新的版本。
+
+**Windows**：从 python.org 下载安装，安装第一页勾上 *Add python.exe to PATH*。
+然后在解压出来的仓库文件夹里（地址栏输入 `powershell` 回车，就在这个文件夹打开了终端）运行：
 
 ```
 pip install -r moomoo_strat/requirements.txt
 ```
+
+**Linux / VPS**（Ubuntu 24.04 这类新系统）：系统自带的 Python 不让直接 `pip install`
+（报 `externally-managed-environment`），要先建一个虚拟环境；命令也是 `python3` 不是 `python`。
+VPS 上仓库在 `~/9678`、虚拟环境在 `~/9678/.venv`（`scripts/vps_setup.sh` 建的）：
+
+```
+cd ~/9678 && git pull
+.venv/bin/pip install -r moomoo_strat/requirements.txt
+.venv/bin/python moomoo_strat/run.py check
+```
+
+没有 `.venv` 的话先 `python3 -m venv .venv`（报错就先 `apt install -y python3-venv`）。
+下面的命令在 VPS 上都把开头的 `python` 换成 `.venv/bin/python`。
 
 ## 第三步：检查连接
 
@@ -60,6 +89,7 @@ python moomoo_strat/run.py check
 ```
 
 正常会打印：OpenD 版本、行情是否已登录、历史 K 线额度、你所有的自选股分组名。
+报「连不上 OpenD」就是这台电脑上的 OpenD 没开、没登录，或者端口不对。
 分组名要和这里打印的**一字不差**（系统分组在不同语言版本里可能叫「全部」或 "All"）。
 想顺便看某个分组里有哪些股票：
 
@@ -79,7 +109,7 @@ python moomoo_strat/run.py check --group 美股
 python moomoo_strat/run.py backtest --group 美股
 ```
 
-默认从 2015-01-01 拉前复权日 K。几十只股票第一次拉大约几分钟（每 30 秒最多 60 次请求，程序自动放慢）。
+`美股` 换成你在 `check` 里看到的分组名。默认从 2015-01-01 拉前复权日 K。几十只股票第一次拉大约几分钟（每 30 秒最多 60 次请求，程序自动放慢）。
 跑完在终端打印报告，同时存到 `moomoo_strat/out/`：
 
 - `backtest_<分组>_<日期>.md`：总表、零假设、前后半段、五浪逐笔、逐只汇总

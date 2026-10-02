@@ -10,6 +10,7 @@ OpenD 是 moomoo 官方的本地网关程序，Python 只跟它说话（默认 1
 from __future__ import annotations
 
 import datetime as dt
+import socket
 import time
 from pathlib import Path
 
@@ -29,6 +30,15 @@ class OpenD:
             import moomoo as mm
         except ImportError as e:
             raise SystemExit("没装 moomoo-api：pip install -r moomoo_strat/requirements.txt") from e
+        # 先试一下端口：OpenD 没开时，SDK 的 OpenQuoteContext 会每 6 秒重连一次、永远不返回，看上去就是卡住了
+        try:
+            socket.create_connection((host, port), timeout=3).close()
+        except OSError as e:
+            raise SystemExit(
+                f"连不上 OpenD（{host}:{port}）：{e}\n"
+                "  · OpenD 打开并登录了吗？注意 moomoo 桌面版 / App 不是 OpenD，OpenD 是另一个程序\n"
+                "  · OpenD 要和这个 Python 程序在同一台电脑上（OpenD 在 Windows、程序在 VPS 上是连不到的）\n"
+                "  · 改过端口的话加 --port") from e
         self.mm = mm
         self.ctx = mm.OpenQuoteContext(host=host, port=port)
 

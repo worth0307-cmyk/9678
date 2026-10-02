@@ -63,11 +63,18 @@ OpenD 是 moomoo 官方的本地网关程序。Python 不直接连 moomoo 服务
 2. 装 Python 3.9 或更新的版本。
 
 **Windows**：从 python.org 下载安装，安装第一页勾上 *Add python.exe to PATH*。
-然后在解压出来的仓库文件夹里（地址栏输入 `powershell` 回车，就在这个文件夹打开了终端）运行：
+然后打开 PowerShell，把下面五行整段粘贴进去：下载代码到你的用户目录、解压、装依赖。
+以后代码有更新，再粘一遍就是更新（会覆盖旧文件，`cache/`、`out/` 里的东西不受影响）。
 
 ```
-pip install -r moomoo_strat/requirements.txt
+cd $HOME; $ProgressPreference = 'SilentlyContinue'
+Invoke-WebRequest "https://github.com/worth0307-cmyk/9678/archive/refs/heads/claude/btcusdt-trading-system-hl6119.zip" -OutFile 9678.zip
+Expand-Archive 9678.zip -DestinationPath . -Force
+cd 9678-claude-btcusdt-trading-system-hl6119
+python -m pip install -r moomoo_strat/requirements.txt
 ```
+
+之后每次打开 PowerShell，先 `cd $HOME\9678-claude-btcusdt-trading-system-hl6119` 进到这个文件夹，再跑下面的命令。
 
 **Linux / VPS**（Ubuntu 24.04 这类新系统）：系统自带的 Python 不让直接 `pip install`
 （报 `externally-managed-environment`），要先建一个虚拟环境；命令也是 `python3` 不是 `python`。
